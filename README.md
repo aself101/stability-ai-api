@@ -6,18 +6,17 @@ This service follows the data-collection architecture pattern with organized dat
 
 ## Quick Start
 ```bash
-# Install dependencies
-cd stability-ai-api
-npm install
+# Install globally
+npm install -g stability-ai-api
 
 # Set your API key
 export STABILITY_API_KEY="your-api-key"
 
 # Generate an image
-npm run stability -- generate ultra --prompt "a serene mountain landscape"
+sai generate ultra --prompt "a serene mountain landscape"
 
 # Upscale an image
-npm run stability -- upscale fast --image ./photo.jpg
+sai upscale fast --image ./photo.jpg
 ```
 
 ## Table of Contents
@@ -104,30 +103,40 @@ You can provide your API key in multiple ways (listed in priority order):
 
 #### Option 1: CLI Flag (Highest Priority)
 ```bash
-npm run stability -- generate ultra --api-key "your-api-key" --prompt "test"
+sai generate ultra --api-key "your-api-key" --prompt "test"
 ```
 
 #### Option 2: Environment Variable
 ```bash
 export STABILITY_API_KEY="your-api-key"
-npm run stability -- generate ultra --prompt "test"
+sai generate ultra --prompt "test"
 ```
 
 #### Option 3: Local .env File
 ```bash
 echo "STABILITY_API_KEY=your-api-key" > .env
-npm run stability -- generate ultra --prompt "test"
+sai generate ultra --prompt "test"
 ```
 
 #### Option 4: Global Configuration
 ```bash
 mkdir -p ~/.stability
 echo "STABILITY_API_KEY=your-api-key" > ~/.stability/.env
-npm run stability -- generate ultra --prompt "test"
+sai generate ultra --prompt "test"
 ```
 
 ## Installation
 
+### Global Installation (Recommended)
+```bash
+# Install globally from npm
+npm install -g stability-ai-api
+
+# Verify installation
+sai --version
+```
+
+### Local Development
 ```bash
 # Clone or navigate to the repository
 cd stability-ai-api
@@ -135,7 +144,7 @@ cd stability-ai-api
 # Install dependencies
 npm install
 
-# Verify installation
+# Run tests
 npm test  # Run 122 tests
 ```
 
@@ -143,21 +152,19 @@ npm test  # Run 122 tests
 
 ### Show Help
 ```bash
-npm run stability -- --help
-npm run stability:help
+sai --help
 ```
 
 ### Show Examples
 ```bash
-npm run stability -- --examples
-npm run stability:examples
+sai --examples
 ```
 
 ### Generation Commands
 
 **Stable Image Ultra:**
 ```bash
-npm run stability -- generate ultra \
+sai generate ultra \
   --prompt "a serene mountain landscape at sunset" \
   --aspect-ratio "16:9" \
   --output-format png
@@ -165,7 +172,7 @@ npm run stability -- generate ultra \
 
 **Stable Image Core with Style:**
 ```bash
-npm run stability -- generate core \
+sai generate core \
   --prompt "cyberpunk city at night" \
   --aspect-ratio "21:9" \
   --style-preset cinematic
@@ -173,7 +180,7 @@ npm run stability -- generate core \
 
 **Stable Diffusion 3.5:**
 ```bash
-npm run stability -- generate sd3 \
+sai generate sd3 \
   --prompt "fantasy castle on floating island" \
   --model sd3.5-large-turbo \
   --aspect-ratio "16:9"
@@ -183,21 +190,21 @@ npm run stability -- generate sd3 \
 
 **Fast Upscale:**
 ```bash
-npm run stability -- upscale fast \
+sai upscale fast \
   --image ./photo.jpg \
   --output-format png
 ```
 
 **Conservative Upscale:**
 ```bash
-npm run stability -- upscale conservative \
+sai upscale conservative \
   --image ./photo.jpg \
   --prompt "enhance details and sharpness"
 ```
 
 **Creative Upscale:**
 ```bash
-npm run stability -- upscale creative \
+sai upscale creative \
   --image ./sketch.jpg \
   --prompt "photorealistic rendering" \
   --creativity 0.35
@@ -207,7 +214,7 @@ npm run stability -- upscale creative \
 
 Process multiple prompts in a single command:
 ```bash
-npm run stability -- generate core \
+sai generate core \
   --prompt "a red sports car" \
   --prompt "a blue vintage car" \
   --prompt "a green electric car" \
@@ -219,22 +226,22 @@ npm run stability -- generate core \
 ### Basic Image Generation
 ```bash
 # Simple generation with Ultra model
-npm run stability -- generate ultra --prompt "a cat wearing a wizard hat"
+sai generate ultra --prompt "a cat wearing a wizard hat"
 
 # With custom aspect ratio
-npm run stability -- generate ultra \
+sai generate ultra \
   --prompt "mountain landscape" \
   --aspect-ratio "21:9"
 
 # With seed for reproducibility
-npm run stability -- generate core \
+sai generate core \
   --prompt "abstract art" \
   --seed 42
 ```
 
 ### Image-to-Image with Ultra
 ```bash
-npm run stability -- generate ultra \
+sai generate ultra \
   --prompt "transform into oil painting style" \
   --image ./photo.jpg \
   --strength 0.6
@@ -242,7 +249,7 @@ npm run stability -- generate ultra \
 
 ### Style Presets with Core
 ```bash
-npm run stability -- generate core \
+sai generate core \
   --prompt "portrait of a person" \
   --style-preset photographic
 ```
@@ -250,15 +257,15 @@ npm run stability -- generate core \
 ### Upscaling Workflow
 ```bash
 # Fast 4x upscale
-npm run stability -- upscale fast --image ./low_res.jpg
+sai upscale fast --image ./low_res.jpg
 
 # Conservative 40x upscale with prompt
-npm run stability -- upscale conservative \
+sai upscale conservative \
   --image ./photo.jpg \
   --prompt "enhance facial details"
 
 # Creative upscale with high creativity
-npm run stability -- upscale creative \
+sai upscale creative \
   --image ./sketch.jpg \
   --prompt "vibrant colors, enhanced details" \
   --creativity 0.5
@@ -267,17 +274,17 @@ npm run stability -- upscale creative \
 ### Advanced Options
 ```bash
 # Custom output directory
-npm run stability -- generate ultra \
+sai generate ultra \
   --prompt "logo design" \
   --output-dir ./my-generations
 
 # Debug logging
-npm run stability -- generate core \
+sai generate core \
   --prompt "test image" \
   --log-level debug
 
 # Negative prompts
-npm run stability -- generate sd3 \
+sai generate sd3 \
   --prompt "beautiful landscape" \
   --negative-prompt "people, cars, buildings"
 ```
@@ -386,7 +393,7 @@ npm run test:coverage
 echo $STABILITY_API_KEY
 
 # Or use CLI flag
-npm run stability -- generate ultra --api-key "your-key" --prompt "test"
+sai generate ultra --api-key "your-key" --prompt "test"
 ```
 
 **Invalid Parameters:**
@@ -406,13 +413,13 @@ npm run stability -- generate ultra --api-key "your-key" --prompt "test"
 ls -lh ./photo.jpg
 
 # Use absolute path if needed
-npm run stability -- upscale fast --image /full/path/to/photo.jpg
+sai upscale fast --image /full/path/to/photo.jpg
 ```
 
 **Debug Mode:**
 ```bash
 # Enable debug logging for detailed information
-npm run stability -- generate ultra --prompt "test" --log-level debug
+sai generate ultra --prompt "test" --log-level debug
 ```
 
 ### Response Types
