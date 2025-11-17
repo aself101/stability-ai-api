@@ -165,7 +165,7 @@ const program = new Command();
 program
   .name('sai')
   .description('Stability AI image generation and upscaling CLI')
-  .version('0.1.0')
+  .version('0.1.1')
   .option('--api-key <key>', 'Stability AI API key (overrides env var)')
   .option('--output-dir <dir>', 'Output directory for generated images')
   .option('--log-level <level>', 'Log level (debug, info, warn, error)', 'info')
