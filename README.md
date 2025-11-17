@@ -25,6 +25,7 @@ sai upscale fast --image ./photo.jpg
 - [Models](#models)
 - [Authentication Setup](#authentication-setup)
 - [Installation](#installation)
+- [Programmatic Usage](#programmatic-usage)
 - [CLI Usage](#cli-usage)
 - [Examples](#examples)
 - [Data Organization](#data-organization)
@@ -146,6 +147,267 @@ npm install
 
 # Run tests
 npm test  # Run 122 tests
+```
+
+## Programmatic Usage
+
+You can use the Stability AI API directly in your Node.js applications.
+
+### Basic Setup
+
+```javascript
+// If installed via npm
+import { StabilityAPI } from 'stability-ai-api';
+
+// If running from source
+import { StabilityAPI } from './api.js';
+
+// Initialize with API key (reads from env vars by default)
+const api = new StabilityAPI();
+
+// Or explicitly provide API key
+const api = new StabilityAPI('your-api-key-here');
+```
+
+### Generation Methods
+
+#### Stable Image Ultra - Text-to-Image
+
+```javascript
+import { StabilityAPI } from 'stability-ai-api';
+
+const api = new StabilityAPI();
+
+const result = await api.generateUltra({
+  prompt: 'a serene mountain landscape at sunset',
+  aspect_ratio: '16:9',
+  seed: 42,
+  output_format: 'png'
+});
+
+// result.image is a Buffer containing the PNG data
+console.log('Generated image, seed:', result.seed);
+console.log('Finish reason:', result.finish_reason);
+```
+
+#### Stable Image Ultra - Image-to-Image
+
+```javascript
+const result = await api.generateUltra({
+  prompt: 'transform into oil painting style',
+  image: './photo.jpg',  // Local file path
+  strength: 0.6,         // 0.0 = identical to input, 1.0 = completely new
+  aspect_ratio: '1:1',
+  output_format: 'png'
+});
+```
+
+#### Stable Image Core with Style Presets
+
+```javascript
+const result = await api.generateCore({
+  prompt: 'cyberpunk city at night',
+  aspect_ratio: '21:9',
+  style_preset: 'cinematic',  // photographic, anime, cinematic, etc.
+  seed: 12345,
+  output_format: 'png'
+});
+```
+
+#### Stable Diffusion 3.5
+
+```javascript
+const result = await api.generateSD3({
+  prompt: 'fantasy castle on a floating island',
+  model: 'sd3.5-large-turbo',  // sd3.5-large, sd3.5-medium, sd3.5-large-turbo
+  aspect_ratio: '16:9',
+  negative_prompt: 'blurry, low quality',
+  seed: 999,
+  output_format: 'webp'
+});
+```
+
+### Upscaling Methods
+
+#### Fast Upscale (4x, ~1 second)
+
+```javascript
+const result = await api.upscaleFast(
+  './low_res.jpg',  // Image path
+  'png'             // Output format (optional)
+);
+
+// Synchronous - returns immediately with upscaled image
+console.log('Upscaled image size:', result.image.length);
+```
+
+#### Conservative Upscale (20-40x to 4MP)
+
+```javascript
+const result = await api.upscaleConservative('./photo.jpg', {
+  prompt: 'enhance details and sharpness',
+  negative_prompt: 'blurry, artifacts',
+  seed: 42,
+  output_format: 'png'
+});
+
+// Synchronous - minimal alteration to original
+```
+
+#### Creative Upscale (20-40x with reimagining)
+
+```javascript
+const result = await api.upscaleCreative('./sketch.jpg', {
+  prompt: 'photorealistic rendering with vibrant colors',
+  creativity: 0.35,  // 0.1 = conservative, 0.5 = very creative
+  seed: 777,
+  output_format: 'png'
+});
+
+// Asynchronous - automatically polls for result
+// The method waits until upscaling completes
+console.log('Creative upscale finished:', result.finish_reason);
+```
+
+### Utility Methods
+
+#### Check Account Credits
+
+```javascript
+const balance = await api.getBalance();
+console.log('Credits remaining:', balance.credits);
+```
+
+#### Get Result for Async Operations
+
+```javascript
+// For Creative Upscale or if you want to poll manually
+const taskId = 'abc123-task-id';
+
+// Poll once
+const status = await api.getResult(taskId);
+
+// Or wait for completion with auto-polling
+const result = await api.waitForResult(taskId, {
+  timeout: 300,      // Max 5 minutes
+  pollInterval: 2,   // Check every 2 seconds
+  maxRetries: 3,     // Retry on transient errors
+  showSpinner: true  // Show animated progress spinner
+});
+```
+
+### Complete Example: Batch Generation
+
+```javascript
+import { StabilityAPI } from 'stability-ai-api';
+import { writeToFile } from 'stability-ai-api/utils';
+import path from 'path';
+
+const api = new StabilityAPI();
+
+const prompts = [
+  'a red sports car on a mountain road',
+  'a blue vintage car in the city',
+  'a green electric car at a charging station'
+];
+
+for (const prompt of prompts) {
+  console.log(`Generating: ${prompt}`);
+
+  const result = await api.generateCore({
+    prompt,
+    aspect_ratio: '16:9',
+    style_preset: 'photographic',
+    output_format: 'png'
+  });
+
+  // Save to file
+  const filename = `${Date.now()}_${prompt.slice(0, 30)}.png`;
+  await writeToFile(result.image, path.join('./outputs', filename));
+
+  console.log(`✓ Saved: ${filename}`);
+  console.log(`  Seed: ${result.seed}`);
+}
+```
+
+### Complete Example: Image Processing Pipeline
+
+```javascript
+import { StabilityAPI } from 'stability-ai-api';
+import { writeToFile } from 'stability-ai-api/utils';
+
+const api = new StabilityAPI();
+
+// Step 1: Generate base image
+console.log('Generating base image...');
+const generated = await api.generateUltra({
+  prompt: 'a beautiful landscape painting',
+  aspect_ratio: '16:9'
+});
+
+await writeToFile(generated.image, './step1_generated.png');
+
+// Step 2: Transform with image-to-image
+console.log('Transforming style...');
+const transformed = await api.generateUltra({
+  prompt: 'same scene but in watercolor style',
+  image: './step1_generated.png',
+  strength: 0.7
+});
+
+await writeToFile(transformed.image, './step2_transformed.png');
+
+// Step 3: Upscale to high resolution
+console.log('Upscaling to high resolution...');
+const upscaled = await api.upscaleCreative('./step2_transformed.png', {
+  prompt: 'enhance details, vibrant colors, high quality',
+  creativity: 0.3
+});
+
+await writeToFile(upscaled.image, './step3_final_4k.png');
+console.log('✓ Pipeline complete!');
+```
+
+### Error Handling
+
+```javascript
+import { StabilityAPI } from 'stability-ai-api';
+
+const api = new StabilityAPI();
+
+try {
+  const result = await api.generateUltra({
+    prompt: 'test image',
+    aspect_ratio: '16:9'
+  });
+
+  console.log('Success!');
+} catch (error) {
+  if (error.message.includes('API key')) {
+    console.error('Authentication failed - check your API key');
+  } else if (error.message.includes('credits')) {
+    console.error('Insufficient credits');
+  } else if (error.message.includes('moderation')) {
+    console.error('Content rejected by moderation filters');
+  } else {
+    console.error('Generation failed:', error.message);
+  }
+}
+```
+
+### TypeScript Support
+
+The package includes TypeScript-style JSDoc comments for IntelliSense:
+
+```javascript
+/**
+ * @param {Object} params
+ * @param {string} params.prompt - Text description
+ * @param {string} [params.aspect_ratio='1:1'] - Image aspect ratio
+ * @param {number} [params.seed] - Random seed (0-4294967294)
+ * @param {string} [params.output_format='png'] - Output format
+ * @returns {Promise<{image: Buffer, seed: string, finish_reason: string}>}
+ */
 ```
 
 ## CLI Usage
