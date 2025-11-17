@@ -22,10 +22,10 @@
     "LICENSE"
   ],
   "scripts": {
-    "stability": "node cli.js",
-    "stability:help": "node cli.js --help",
-    "stability:examples": "node cli.js --examples",
-    "stability:credits": "node cli.js credits",
+    "sai": "node cli.js",
+    "sai:help": "node cli.js --help",
+    "sai:examples": "node cli.js --examples",
+    "sai:credits": "node cli.js credits",
     "test": "vitest run",
     "test:watch": "vitest watch",
     "test:ui": "vitest --ui",

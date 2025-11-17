@@ -7,12 +7,9 @@
  * Supports Stable Diffusion 3.5, Stable Image Ultra/Core, and upscaling models.
  *
  * Usage:
- *   stability generate ultra --prompt "a cat"
- *   stability generate core --prompt "landscape" --style-preset photographic
- *   stability upscale fast --image ./photo.jpg
- *
- * Or with npm:
- *   npm run stability -- generate ultra --prompt "a cat"
+ *   sai generate ultra --prompt "a cat"
+ *   sai generate core --prompt "landscape" --style-preset photographic
+ *   sai upscale fast --image ./photo.jpg
  *
  * Models:
  *   Generate:
@@ -53,39 +50,39 @@ ${'='.repeat(60)}
 GENERATE COMMANDS
 
 1. Stable Image Ultra - Photorealistic generation
-   $ npm run stability -- generate ultra \\
+   $ sai generate ultra \\
        --prompt "a serene mountain landscape at sunset" \\
        --aspect-ratio "16:9" \\
        --output-format png
 
 2. Stable Image Ultra - Image-to-image with strength
-   $ npm run stability -- generate ultra \\
+   $ sai generate ultra \\
        --prompt "transform into oil painting style" \\
        --image ./photo.jpg \\
        --strength 0.6 \\
        --aspect-ratio "1:1"
 
 3. Stable Image Core - Fast generation with style preset
-   $ npm run stability -- generate core \\
+   $ sai generate core \\
        --prompt "cyberpunk city at night" \\
        --aspect-ratio "21:9" \\
        --style-preset cinematic
 
 4. Stable Diffusion 3.5 - Large model
-   $ npm run stability -- generate sd3 \\
+   $ sai generate sd3 \\
        --prompt "fantasy castle on a floating island" \\
        --model sd3.5-large \\
        --aspect-ratio "16:9" \\
        --seed 42
 
 5. Stable Diffusion 3.5 - Turbo for speed
-   $ npm run stability -- generate sd3 \\
+   $ sai generate sd3 \\
        --prompt "modern minimalist logo design" \\
        --model sd3.5-large-turbo \\
        --aspect-ratio "1:1"
 
 6. Batch generation - Multiple prompts
-   $ npm run stability -- generate core \\
+   $ sai generate core \\
        --prompt "a red sports car" \\
        --prompt "a blue vintage car" \\
        --prompt "a green electric car" \\
@@ -94,25 +91,25 @@ GENERATE COMMANDS
 UPSCALE COMMANDS
 
 7. Fast Upscale - Quick 4x upscaling
-   $ npm run stability -- upscale fast \\
+   $ sai upscale fast \\
        --image ./low_res.jpg \\
        --output-format png
 
 8. Conservative Upscale - Minimal alteration, high quality
-   $ npm run stability -- upscale conservative \\
+   $ sai upscale conservative \\
        --image ./photo.jpg \\
        --prompt "enhance details and sharpness" \\
        --output-format png
 
 9. Creative Upscale - Reimagining with creativity control
-   $ npm run stability -- upscale creative \\
+   $ sai upscale creative \\
        --image ./sketch.jpg \\
        --prompt "photorealistic rendering" \\
        --creativity 0.35 \\
        --output-format png
 
 10. Creative Upscale - Maximum creativity
-    $ npm run stability -- upscale creative \\
+    $ sai upscale creative \\
         --image ./lowres_art.jpg \\
         --prompt "vibrant colors, enhanced details" \\
         --creativity 0.5 \\
@@ -121,18 +118,18 @@ UPSCALE COMMANDS
 ADVANCED OPTIONS
 
 11. Custom output directory
-    $ npm run stability -- generate ultra \\
+    $ sai generate ultra \\
         --prompt "logo design" \\
         --output-dir ./my-generations \\
         --aspect-ratio "1:1"
 
 12. Debug logging
-    $ npm run stability -- generate core \\
+    $ sai generate core \\
         --prompt "test image" \\
         --log-level debug
 
 13. Negative prompts
-    $ npm run stability -- generate sd3 \\
+    $ sai generate sd3 \\
         --prompt "beautiful landscape" \\
         --negative-prompt "people, cars, buildings" \\
         --aspect-ratio "21:9"
@@ -140,24 +137,24 @@ ADVANCED OPTIONS
 UTILITY COMMANDS
 
 14. Check account credits
-    $ npm run stability -- credits
+    $ sai credits
 
 AUTHENTICATION OPTIONS:
 
 A. CLI flag (highest priority)
-   $ stability generate ultra --api-key YOUR_KEY --prompt "test"
+   $ sai generate ultra --api-key YOUR_KEY --prompt "test"
 
 B. Environment variable
    $ export STABILITY_API_KEY=YOUR_KEY
-   $ stability generate ultra --prompt "test"
+   $ sai generate ultra --prompt "test"
 
 C. Local .env file (current directory)
    $ echo "STABILITY_API_KEY=YOUR_KEY" > .env
-   $ stability generate ultra --prompt "test"
+   $ sai generate ultra --prompt "test"
 
 D. Global config (for global installs)
    $ mkdir -p ~/.stability && echo "STABILITY_API_KEY=YOUR_KEY" > ~/.stability/.env
-   $ stability generate ultra --prompt "test"
+   $ sai generate ultra --prompt "test"
 
 ${'='.repeat(60)}
 `);
@@ -166,7 +163,7 @@ ${'='.repeat(60)}
 const program = new Command();
 
 program
-  .name('stability')
+  .name('sai')
   .description('Stability AI image generation and upscaling CLI')
   .version('0.1.0')
   .option('--api-key <key>', 'Stability AI API key (overrides env var)')
