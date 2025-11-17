@@ -185,7 +185,16 @@ export class StabilityAPI {
       // Handle specific error cases
       if (error.response) {
         const status = error.response.status;
-        const data = error.response.data;
+        let data = error.response.data;
+
+        // Parse Buffer responses to JSON
+        if (Buffer.isBuffer(data)) {
+          try {
+            data = JSON.parse(data.toString('utf8'));
+          } catch (parseError) {
+            logger.error(`Failed to parse error response buffer: ${parseError.message}`);
+          }
+        }
 
         logger.error(`HTTP ${status}: ${JSON.stringify(data)}`);
 
@@ -199,7 +208,7 @@ export class StabilityAPI {
           throw new Error('Rate limit exceeded. Please wait before retrying.');
         } else if (status === 400) {
           // Extract validation errors if available
-          const errorMsg = data.errors ? JSON.stringify(data.errors) : JSON.stringify(data);
+          const errorMsg = data.errors ? data.errors.join(', ') : JSON.stringify(data);
           throw new Error(`Invalid parameters: ${errorMsg}`);
         }
       }
