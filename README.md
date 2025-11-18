@@ -1,5 +1,10 @@
 # Stability AI Image Generation Service
 
+[![npm version](https://img.shields.io/npm/v/stability-ai-api.svg)](https://www.npmjs.com/package/stability-ai-api)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Node.js Version](https://img.shields.io/node/v/stability-ai-api)](https://nodejs.org)
+[![Tests](https://img.shields.io/badge/tests-122%20passing-brightgreen)](test/)
+
 A Node.js wrapper for the [Stability AI API](https://platform.stability.ai/docs/api-reference) that provides easy access to Stable Diffusion 3.5 and image upscaling models. Generate stunning AI images and upscale existing ones with professional quality through a simple command-line interface.
 
 This service follows the data-collection architecture pattern with organized data storage, automatic polling for async operations, retry logic, comprehensive logging, and CLI orchestration.
@@ -56,38 +61,68 @@ The Stability AI API provides access to state-of-the-art image generation and up
 Photorealistic 1MP image generation with image-to-image support.
 
 **Best for:** Photorealistic renders, product photos, portraits
-**Parameters:** prompt, aspect_ratio, seed, image (optional), strength (0-1)
+
+**Parameters:**
+- `prompt` - Text description of desired image (required)
+- `aspect_ratio` - Image proportions (1:1, 16:9, 21:9, 2:3, 3:2, 4:5, 5:4, 9:16, 9:21)
+- `seed` - Random seed (0 to 4,294,967,294)
+- `image` - Optional input image for image-to-image generation
+- `strength` - Image influence strength (0.0-1.0, for image-to-image)
 
 ### Stable Image Core
 Fast and affordable SDXL successor with style presets.
 
 **Best for:** Fast generation, stylized images, production workflows
-**Parameters:** prompt, aspect_ratio, seed, style_preset (photographic, anime, cinematic, etc.)
+
+**Parameters:**
+- `prompt` - Text description of desired image (required)
+- `aspect_ratio` - Image proportions (1:1, 16:9, 21:9, 2:3, 3:2, 4:5, 5:4, 9:16, 9:21)
+- `seed` - Random seed (0 to 4,294,967,294)
+- `style_preset` - Style preset (photographic, anime, cinematic, digital-art, fantasy-art, etc.)
 
 ### Stable Diffusion 3.5
 Latest SD3.5 models with three variants.
 
 **Models:** sd3.5-large, sd3.5-medium, sd3.5-large-turbo
 **Best for:** General-purpose generation, fast turbo mode
-**Parameters:** prompt, model, aspect_ratio, seed
+
+**Parameters:**
+- `prompt` - Text description of desired image (required)
+- `model` - Model variant (sd3.5-large, sd3.5-medium, sd3.5-large-turbo)
+- `aspect_ratio` - Image proportions (1:1, 16:9, 21:9, 2:3, 3:2, 4:5, 5:4, 9:16, 9:21)
+- `seed` - Random seed (0 to 4,294,967,294)
 
 ### Upscale Fast
 4x upscaling in approximately 1 second (synchronous).
 
 **Best for:** Quick upscales, batch processing
-**Parameters:** image (required), output_format
+
+**Parameters:**
+- `image` - Input image to upscale (required)
+- `output_format` - Output format (jpeg, png, webp)
 
 ### Upscale Conservative
 20-40x upscaling to 4MP with minimal alteration (synchronous).
 
 **Best for:** Preserving original details, minimal changes
-**Parameters:** image (required), prompt (optional), seed
+
+**Parameters:**
+- `image` - Input image to upscale (required)
+- `prompt` - Optional guidance for upscaling
+- `seed` - Random seed (0 to 4,294,967,294)
+- `output_format` - Output format (jpeg, png, webp)
 
 ### Upscale Creative
 20-40x upscaling with creative reimagining (asynchronous with polling).
 
 **Best for:** Enhancing and reimagining images, artistic upscales
-**Parameters:** image (required), prompt (optional), creativity (0.1-0.5), seed
+
+**Parameters:**
+- `image` - Input image to upscale (required)
+- `prompt` - Optional guidance for creative upscaling
+- `creativity` - Creative freedom level (0.1-0.5, higher = more creative)
+- `seed` - Random seed (0 to 4,294,967,294)
+- `output_format` - Output format (jpeg, png, webp)
 
 ## Authentication Setup
 
@@ -704,6 +739,15 @@ The Stability AI API has unique response characteristics:
 - **Asynchronous responses**: Return HTTP 202 with task ID, requires polling
 - **Multipart/form-data**: All requests use form-data (not JSON)
 - **Buffer handling**: Images returned as binary Buffers, not base64
+
+## Related Packages
+
+- [`bfl-api`](https://github.com/aself101/bfl-api) – FLUX & Kontext
+- [`openai-image-api`](https://github.com/aself101/openai-image-api) – DALL·E & GPT Image 1
+
+---
+
+**Disclaimer:** This project is an independent community wrapper and is not affiliated with Stability AI.
 
 ## License
 
