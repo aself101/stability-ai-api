@@ -10,6 +10,8 @@ A Node.js wrapper for the [Stability AI API](https://platform.stability.ai/docs/
 This service follows the data-collection architecture pattern with organized data storage, automatic polling for async operations, retry logic, comprehensive logging, and CLI orchestration.
 
 ## Quick Start
+
+### CLI Usage
 ```bash
 # Install globally
 npm install -g stability-ai-api
@@ -22,6 +24,21 @@ sai generate ultra --prompt "a serene mountain landscape"
 
 # Upscale an image
 sai upscale fast --image ./photo.jpg
+```
+
+### Programmatic Usage
+```javascript
+import { StabilityAPI } from 'stability-ai-api';
+
+const api = new StabilityAPI();
+
+// Generate an image with Stable Image Ultra
+const result = await api.generateStableImageUltra({
+  prompt: 'a serene mountain landscape',
+  aspect_ratio: '16:9'
+});
+
+console.log('Image saved to:', result.image_path);
 ```
 
 ## Table of Contents
