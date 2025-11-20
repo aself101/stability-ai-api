@@ -1,3 +1,10 @@
+## [0.1.6](https://github.com/aself101/stability-ai-api/compare/v0.1.5...v0.1.6) (2025-11-20)
+
+
+### Bug Fixes
+
+* **security:** add DNS rebinding prevention to SSRF protection ([01aa86d](https://github.com/aself101/stability-ai-api/commit/01aa86dc79006dbb4694ac23cc983a22f7f151b6))
+
 ## [0.1.5](https://github.com/aself101/stability-ai-api/compare/v0.1.4...v0.1.5) (2025-11-20)
 
 
