@@ -650,6 +650,7 @@ datasets/
 - Blocks private IP ranges (`10.x`, `192.168.x`, `172.16-31.x`, `169.254.x`)
 - Blocks cloud metadata endpoints (`169.254.169.254`, `metadata.google.internal`)
 - **IPv4-Mapped IPv6 Bypass Prevention**: Detects and blocks `[::ffff:127.0.0.1]`, etc.
+- **DNS Rebinding Prevention**: Performs DNS resolution to block domains that resolve to internal/private IPs (prevents TOCTOU attacks via wildcard DNS services like nip.io)
 - Only allows HTTPS URLs for remote images
 
 ### DoS Prevention
