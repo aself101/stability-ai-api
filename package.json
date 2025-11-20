@@ -1,6 +1,6 @@
 {
   "name": "stability-ai-api",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Stability AI API wrapper - Stable Diffusion image generation for Node.js with CLI",
   "main": "api.js",
   "type": "module",

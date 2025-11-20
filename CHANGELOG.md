@@ -1,3 +1,11 @@
+## [0.1.5](https://github.com/aself101/stability-ai-api/compare/v0.1.4...v0.1.5) (2025-11-20)
+
+
+### Bug Fixes
+
+* upgrade vitest (security) ([594b724](https://github.com/aself101/stability-ai-api/commit/594b724b40d6c2aec99000388ee2a2f54cac9eab))
+* upgrade vitest (security); patch bump ([21ea1b7](https://github.com/aself101/stability-ai-api/commit/21ea1b7b1a97894f8581125cdb948dffc9042a7c))
+
 # Changelog
 
 All notable changes to this project will be documented in this file.
