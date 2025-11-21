@@ -36,7 +36,15 @@ import {
   logger
 } from './utils.js';
 import path from 'path';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+
+// Get version from package.json dynamically
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const { version } = JSON.parse(
+  readFileSync(path.join(__dirname, 'package.json'), 'utf8')
+);
 
 /**
  * Display usage examples.
@@ -165,7 +173,7 @@ const program = new Command();
 program
   .name('sai')
   .description('Stability AI image generation and upscaling CLI')
-  .version('0.1.5')
+  .version(version)
   .option('--api-key <key>', 'Stability AI API key (overrides env var)')
   .option('--output-dir <dir>', 'Output directory for generated images')
   .option('--log-level <level>', 'Log level (debug, info, warn, error)', 'info')

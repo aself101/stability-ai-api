@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/stability-ai-api.svg)](https://www.npmjs.com/package/stability-ai-api)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node.js Version](https://img.shields.io/node/v/stability-ai-api)](https://nodejs.org)
-[![Tests](https://img.shields.io/badge/tests-122%20passing-brightgreen)](test/)
+[![Tests](https://img.shields.io/badge/tests-162%20passing-brightgreen)](test/)
 
 A Node.js wrapper for the [Stability AI API](https://platform.stability.ai/docs/api-reference) that provides easy access to Stable Diffusion 3.5 and image upscaling models. Generate stunning AI images and upscale existing ones with professional quality through a simple command-line interface.
 
@@ -33,7 +33,7 @@ import { StabilityAPI } from 'stability-ai-api';
 const api = new StabilityAPI();
 
 // Generate an image with Stable Image Ultra
-const result = await api.generateStableImageUltra({
+const result = await api.generateUltra({
   prompt: 'a serene mountain landscape',
   aspect_ratio: '16:9'
 });
@@ -70,7 +70,7 @@ The Stability AI API provides access to state-of-the-art image generation and up
 - **Image Input Support** - Convert local files to Buffers with validation
 - **Organized Storage** - Structured directories with timestamped files and metadata
 - **CLI Orchestration** - Command-line tool with subcommands for generation and upscaling
-- **Comprehensive Testing** - 122 tests with Vitest for reliability
+- **Comprehensive Testing** - 162 tests with Vitest for reliability
 
 ## Models
 
@@ -198,7 +198,7 @@ cd stability-ai-api
 npm install
 
 # Run tests
-npm test  # Run 122 tests
+npm test  # Run 162 tests
 ```
 
 ## Programmatic Usage
@@ -675,7 +675,7 @@ datasets/
 The service includes comprehensive testing:
 
 ```bash
-# Run all tests (122 tests)
+# Run all tests (162 tests)
 npm test
 
 # Watch mode for development
@@ -760,8 +760,12 @@ The Stability AI API has unique response characteristics:
 
 ## Related Packages
 
-- [`bfl-api`](https://github.com/aself101/bfl-api) – FLUX & Kontext
-- [`openai-image-api`](https://github.com/aself101/openai-image-api) – DALL·E & GPT Image 1
+This package is part of the img-gen ecosystem. Check out these other AI generation services:
+
+- [`ideogram-api`](https://github.com/aself101/ideogram-api) - Ideogram API wrapper for image generation, editing, remixing, and manipulation
+- [`bfl-api`](https://github.com/aself101/bfl-api) - Black Forest Labs API wrapper for FLUX and Kontext models
+- [`google-genai-api`](https://github.com/aself101/google-genai-api) - Google Generative AI (Imagen) wrapper
+- [`openai-api`](https://github.com/aself101/openai-api) - OpenAI API wrapper for DALL-E and GPT Image generation
 
 ---
 
@@ -775,5 +779,5 @@ MIT
 
 Contributions welcome! Please ensure all tests pass before submitting PRs:
 ```bash
-npm test  # All 122 tests must pass
+npm test  # All 162 tests must pass
 ```

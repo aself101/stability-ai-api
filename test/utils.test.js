@@ -20,7 +20,10 @@ import {
   validateImageFile,
   imageToBuffer,
   fileToBuffer,
-  buildFormData
+  buildFormData,
+  ensureDirectory,
+  writeToFile,
+  readFromFile
 } from '../utils.js';
 import { validateApiKeyFormat } from '../config.js';
 import { lookup } from 'dns/promises';
@@ -417,6 +420,124 @@ describe('Image Buffer Functions', () => {
       });
 
       expect(formData).toBeDefined();
+    });
+  });
+});
+
+describe('File I/O Functions', () => {
+  const testDir = join(process.cwd(), 'test-temp-io');
+  const testJsonFile = join(testDir, 'test-data.json');
+  const testTxtFile = join(testDir, 'test-data.txt');
+  const testBinFile = join(testDir, 'test-data.png');
+
+  afterAll(async () => {
+    // Cleanup test files
+    const fs = await import('fs/promises');
+    try {
+      await fs.rm(testDir, { recursive: true, force: true });
+    } catch (e) {
+      // Ignore cleanup errors
+    }
+  });
+
+  describe('ensureDirectory', () => {
+    it('should create directory if it does not exist', async () => {
+      const newDir = join(testDir, 'new-subdir', 'nested');
+      await ensureDirectory(newDir);
+
+      const fs = await import('fs/promises');
+      const stat = await fs.stat(newDir);
+      expect(stat.isDirectory()).toBe(true);
+    });
+
+    it('should not throw if directory already exists', async () => {
+      await ensureDirectory(testDir);
+      // Should not throw on second call
+      await expect(ensureDirectory(testDir)).resolves.not.toThrow();
+    });
+  });
+
+  describe('writeToFile', () => {
+    it('should write JSON data', async () => {
+      const data = { name: 'test', value: 42 };
+      await writeToFile(data, testJsonFile, 'json');
+
+      const fs = await import('fs/promises');
+      const content = await fs.readFile(testJsonFile, 'utf-8');
+      expect(JSON.parse(content)).toEqual(data);
+    });
+
+    it('should write text data', async () => {
+      await writeToFile('Hello World', testTxtFile, 'txt');
+
+      const fs = await import('fs/promises');
+      const content = await fs.readFile(testTxtFile, 'utf-8');
+      expect(content).toBe('Hello World');
+    });
+
+    it('should write binary data', async () => {
+      const buffer = Buffer.from([0x89, 0x50, 0x4E, 0x47]);
+      await writeToFile(buffer, testBinFile, 'binary');
+
+      const fs = await import('fs/promises');
+      const content = await fs.readFile(testBinFile);
+      expect(Buffer.compare(content, buffer)).toBe(0);
+    });
+
+    it('should auto-detect JSON format from extension', async () => {
+      const data = { auto: true };
+      const autoJsonFile = join(testDir, 'auto-test.json');
+      await writeToFile(data, autoJsonFile); // No format specified
+
+      const fs = await import('fs/promises');
+      const content = await fs.readFile(autoJsonFile, 'utf-8');
+      expect(JSON.parse(content)).toEqual(data);
+    });
+
+    it('should throw if filepath not provided', async () => {
+      await expect(writeToFile({ test: true }, null))
+        .rejects.toThrow('Filepath is required');
+    });
+  });
+
+  describe('readFromFile', () => {
+    beforeAll(async () => {
+      // Setup test files
+      const fs = await import('fs/promises');
+      await fs.mkdir(testDir, { recursive: true });
+      await fs.writeFile(join(testDir, 'read-test.json'), '{"key":"value"}');
+      await fs.writeFile(join(testDir, 'read-test.txt'), 'Text content');
+      await fs.writeFile(join(testDir, 'read-test.png'), Buffer.from([0x89, 0x50, 0x4E, 0x47]));
+    });
+
+    it('should read JSON file', async () => {
+      const data = await readFromFile(join(testDir, 'read-test.json'), 'json');
+      expect(data).toEqual({ key: 'value' });
+    });
+
+    it('should read text file', async () => {
+      const data = await readFromFile(join(testDir, 'read-test.txt'), 'txt');
+      expect(data).toBe('Text content');
+    });
+
+    it('should read binary file', async () => {
+      const data = await readFromFile(join(testDir, 'read-test.png'), 'binary');
+      expect(data).toBeInstanceOf(Buffer);
+    });
+
+    it('should auto-detect format from extension', async () => {
+      const data = await readFromFile(join(testDir, 'read-test.json')); // No format
+      expect(data).toEqual({ key: 'value' });
+    });
+
+    it('should throw if filepath not provided', async () => {
+      await expect(readFromFile(null))
+        .rejects.toThrow('Filepath is required');
+    });
+
+    it('should throw if file does not exist', async () => {
+      await expect(readFromFile(join(testDir, 'nonexistent.json')))
+        .rejects.toThrow();
     });
   });
 });

@@ -17,8 +17,8 @@
  */
 
 import axios from 'axios';
-import { logger, buildFormData, downloadImage, createSpinner } from './utils.js';
-import { BASE_URL, MODEL_ENDPOINTS, DEFAULT_POLL_INTERVAL, DEFAULT_TIMEOUT, MAX_RETRIES } from './config.js';
+import { logger, buildFormData, createSpinner } from './utils.js';
+import { BASE_URL, MODEL_ENDPOINTS, DEFAULT_POLL_INTERVAL, DEFAULT_TIMEOUT } from './config.js';
 
 /**
  * Stability AI API Client
