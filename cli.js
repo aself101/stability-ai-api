@@ -25,7 +25,7 @@
 
 import { Command } from 'commander';
 import { StabilityAPI } from './api.js';
-import { getStabilityApiKey, validateModelParams, validateEditParams, getOutputDir, STYLE_PRESETS } from './config.js';
+import { getStabilityApiKey, validateModelParams, validateEditParams, validateControlParams, getOutputDir, STYLE_PRESETS, ASPECT_RATIOS } from './config.js';
 import {
   writeToFile,
   ensureDirectory,
@@ -122,20 +122,43 @@ UPSCALE COMMANDS
         --creativity 0.5 \\
         --seed 12345
 
+CONTROL COMMANDS
+
+11. Control Sketch - Convert sketch to image
+    $ sai control sketch \\
+        --image ./sketch.png \\
+        --prompt "medieval castle on a hill"
+
+12. Control Structure - Preserve structure, change content
+    $ sai control structure \\
+        --image ./statue.jpg \\
+        --prompt "garden shrub in english garden"
+
+13. Control Style - Apply style to new content
+    $ sai control style \\
+        --image ./art-reference.png \\
+        --prompt "portrait of a chicken" \\
+        --fidelity 0.7
+
+14. Control Style Transfer - Apply style between images
+    $ sai control style-transfer \\
+        --init-image ./photo.png \\
+        --style-image ./painting.jpg
+
 ADVANCED OPTIONS
 
-11. Custom output directory
+15. Custom output directory
     $ sai generate ultra \\
         --prompt "logo design" \\
         --output-dir ./my-generations \\
         --aspect-ratio "1:1"
 
-12. Debug logging
+16. Debug logging
     $ sai generate core \\
         --prompt "test image" \\
         --log-level debug
 
-13. Negative prompts
+17. Negative prompts
     $ sai generate sd3 \\
         --prompt "beautiful landscape" \\
         --negative-prompt "people, cars, buildings" \\
@@ -143,7 +166,7 @@ ADVANCED OPTIONS
 
 UTILITY COMMANDS
 
-14. Check account credits
+18. Check account credits
     $ sai credits
 
 AUTHENTICATION OPTIONS:
@@ -433,6 +456,96 @@ editCmd
   .description('Show edit operation examples')
   .action(() => {
     showEditExamples();
+  });
+
+// ==================== Control Commands ====================
+
+/**
+ * Control command with subcommands
+ */
+const controlCmd = program
+  .command('control')
+  .description('Control image generation with structure, style, and sketch inputs');
+
+/**
+ * Control Sketch subcommand
+ */
+controlCmd
+  .command('sketch')
+  .description('Convert sketches to refined images with precise control')
+  .requiredOption('-i, --image <path>', 'Input sketch image path')
+  .requiredOption('-p, --prompt <text>', 'What to generate from the sketch')
+  .option('--control-strength <number>', 'Influence of sketch on generation (0-1)', parseFloat, 0.7)
+  .option('-n, --negative-prompt <text>', 'What NOT to generate')
+  .option('-s, --seed <number>', 'Random seed (0-4294967294)', parseInt)
+  .option('-f, --output-format <format>', 'Output format (jpeg, png, webp)', 'png')
+  .option('--style-preset <style>', `Style preset: ${STYLE_PRESETS.join(', ')}`)
+  .action(async (options, command) => {
+    await handleControlCommand('sketch', options, command.optsWithGlobals());
+  });
+
+/**
+ * Control Structure subcommand
+ */
+controlCmd
+  .command('structure')
+  .description('Generate images while preserving input structure')
+  .requiredOption('-i, --image <path>', 'Input image whose structure to preserve')
+  .requiredOption('-p, --prompt <text>', 'What to generate with the structure')
+  .option('--control-strength <number>', 'Influence of structure on generation (0-1)', parseFloat, 0.7)
+  .option('-n, --negative-prompt <text>', 'What NOT to generate')
+  .option('-s, --seed <number>', 'Random seed (0-4294967294)', parseInt)
+  .option('-f, --output-format <format>', 'Output format (jpeg, png, webp)', 'png')
+  .option('--style-preset <style>', `Style preset: ${STYLE_PRESETS.join(', ')}`)
+  .action(async (options, command) => {
+    await handleControlCommand('structure', options, command.optsWithGlobals());
+  });
+
+/**
+ * Control Style subcommand
+ */
+controlCmd
+  .command('style')
+  .description('Generate images guided by a style reference')
+  .requiredOption('-i, --image <path>', 'Style reference image')
+  .requiredOption('-p, --prompt <text>', 'What to generate with this style')
+  .option('--fidelity <number>', 'How closely output resembles input style (0-1)', parseFloat, 0.5)
+  .option('-a, --aspect-ratio <ratio>', `Output aspect ratio: ${ASPECT_RATIOS.join(', ')}`, '1:1')
+  .option('-n, --negative-prompt <text>', 'What NOT to generate')
+  .option('-s, --seed <number>', 'Random seed (0-4294967294)', parseInt)
+  .option('-f, --output-format <format>', 'Output format (jpeg, png, webp)', 'png')
+  .option('--style-preset <style>', `Style preset: ${STYLE_PRESETS.join(', ')}`)
+  .action(async (options, command) => {
+    await handleControlCommand('style', options, command.optsWithGlobals());
+  });
+
+/**
+ * Control Style Transfer subcommand
+ */
+controlCmd
+  .command('style-transfer')
+  .description('Apply style from one image to another')
+  .requiredOption('--init-image <path>', 'Content image to restyle')
+  .requiredOption('--style-image <path>', 'Style reference image')
+  .option('-p, --prompt <text>', 'Optional prompt to guide transfer')
+  .option('-n, --negative-prompt <text>', 'What NOT to generate')
+  .option('--style-strength <number>', 'Influence of style image (0-1, 0=identical to input)', parseFloat)
+  .option('--composition-fidelity <number>', 'How closely to preserve composition (0-1)', parseFloat, 0.9)
+  .option('--change-strength <number>', 'How much the original should change (0.1-1)', parseFloat, 0.9)
+  .option('-s, --seed <number>', 'Random seed (0-4294967294)', parseInt)
+  .option('-f, --output-format <format>', 'Output format (jpeg, png, webp)', 'png')
+  .action(async (options, command) => {
+    await handleControlCommand('style-transfer', options, command.optsWithGlobals());
+  });
+
+/**
+ * Control Examples subcommand
+ */
+controlCmd
+  .command('examples')
+  .description('Show control operation examples')
+  .action(() => {
+    showControlExamples();
   });
 
 /**
@@ -983,6 +1096,229 @@ CREDITS:
   - Search & Recolor: 5 credits
   - Remove Background: 5 credits
   - Replace BG & Relight: 8 credits
+
+${'='.repeat(60)}
+`);
+}
+
+/**
+ * Handle control command execution
+ */
+async function handleControlCommand(operation, options, globalOptions) {
+  try {
+    // Set log level
+    setLogLevel(globalOptions.logLevel);
+
+    // For style-transfer, validate both images exist
+    if (operation === 'style-transfer') {
+      if (!existsSync(options.initImage)) {
+        logger.error(`Error: Init image file not found: ${options.initImage}`);
+        process.exit(1);
+      }
+      if (!existsSync(options.styleImage)) {
+        logger.error(`Error: Style image file not found: ${options.styleImage}`);
+        process.exit(1);
+      }
+    } else {
+      // Validate input image exists for other operations
+      if (!existsSync(options.image)) {
+        logger.error(`Error: Image file not found: ${options.image}`);
+        process.exit(1);
+      }
+    }
+
+    // Get API key
+    const apiKey = getStabilityApiKey(globalOptions.apiKey);
+
+    // Initialize API client
+    const api = new StabilityAPI(apiKey, undefined, globalOptions.logLevel);
+
+    logger.info('='.repeat(60));
+    logger.info(`Starting control operation: ${operation}`);
+    if (operation === 'style-transfer') {
+      logger.info(`Init image: ${options.initImage}`);
+      logger.info(`Style image: ${options.styleImage}`);
+    } else {
+      logger.info(`Input: ${options.image}`);
+    }
+    if (options.prompt) {
+      logger.info(`Prompt: "${options.prompt}"`);
+    }
+    logger.info('='.repeat(60));
+
+    // Build parameters based on operation
+    const params = buildControlParams(operation, options);
+
+    // Validate parameters
+    const validation = validateControlParams(operation, params);
+    if (!validation.valid) {
+      logger.error('Parameter validation failed:');
+      validation.errors.forEach(err => logger.error(`  - ${err}`));
+      process.exit(1);
+    }
+
+    logger.info('Submitting control request...');
+
+    try {
+      let result;
+      const spinner = createSpinner(`${operation}...`);
+      spinner.start();
+
+      try {
+        // Call appropriate API method
+        switch (operation) {
+          case 'sketch':
+            result = await api.controlSketch(options.image, params.prompt, params);
+            break;
+          case 'structure':
+            result = await api.controlStructure(options.image, params.prompt, params);
+            break;
+          case 'style':
+            result = await api.controlStyle(options.image, params.prompt, params);
+            break;
+          case 'style-transfer':
+            result = await api.controlStyleTransfer(options.initImage, options.styleImage, params);
+            break;
+          default:
+            throw new Error(`Unknown control operation: ${operation}`);
+        }
+
+        spinner.stop(`✓ ${operation} completed successfully`);
+      } catch (error) {
+        spinner.stop();
+        throw error;
+      }
+
+      // Save image
+      const promptText = params.prompt || `control-${operation}`;
+      const modelName = `control-${operation}`;
+      await saveImageResult(result, promptText, modelName, params, globalOptions.outputDir);
+
+      logger.info('='.repeat(60));
+      logger.info(`✓ Control operation complete!`);
+      logger.info('='.repeat(60));
+
+    } catch (error) {
+      logger.error('='.repeat(60));
+      logger.error(`✗ Control operation failed: ${error.message}`);
+      logger.error('='.repeat(60));
+      throw error;
+    }
+
+  } catch (error) {
+    logger.error(`\n✗ Error: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * Build control parameters from CLI options
+ */
+function buildControlParams(operation, options) {
+  const params = {
+    output_format: options.outputFormat || 'png'
+  };
+
+  // Common options
+  if (options.seed !== undefined) params.seed = options.seed;
+  if (options.negativePrompt) params.negative_prompt = options.negativePrompt;
+  if (options.stylePreset) params.style_preset = options.stylePreset;
+
+  // Operation-specific options
+  switch (operation) {
+    case 'sketch':
+    case 'structure':
+      params.prompt = options.prompt;
+      if (options.controlStrength !== undefined) params.control_strength = options.controlStrength;
+      break;
+
+    case 'style':
+      params.prompt = options.prompt;
+      if (options.fidelity !== undefined) params.fidelity = options.fidelity;
+      if (options.aspectRatio) params.aspect_ratio = options.aspectRatio;
+      break;
+
+    case 'style-transfer':
+      if (options.prompt) params.prompt = options.prompt;
+      if (options.styleStrength !== undefined) params.style_strength = options.styleStrength;
+      if (options.compositionFidelity !== undefined) params.composition_fidelity = options.compositionFidelity;
+      if (options.changeStrength !== undefined) params.change_strength = options.changeStrength;
+      break;
+  }
+
+  return params;
+}
+
+/**
+ * Show control operation examples
+ */
+function showControlExamples() {
+  console.log(`
+${'='.repeat(60)}
+STABILITY AI - CONTROL OPERATION EXAMPLES
+${'='.repeat(60)}
+
+SKETCH - Convert sketches to refined images
+  $ sai control sketch \\
+      --image ./sketch.png \\
+      --prompt "a medieval castle on a hill" \\
+      --control-strength 0.7
+
+  # With style preset
+  $ sai control sketch \\
+      --image ./sketch.png \\
+      --prompt "fantasy castle" \\
+      --style-preset fantasy-art
+
+STRUCTURE - Preserve structure while transforming content
+  $ sai control structure \\
+      --image ./statue.png \\
+      --prompt "a well manicured shrub in an english garden" \\
+      --control-strength 0.6
+
+  # Transform a photo to different style
+  $ sai control structure \\
+      --image ./portrait.jpg \\
+      --prompt "oil painting portrait" \\
+      --control-strength 0.8
+
+STYLE - Generate new content with extracted style
+  $ sai control style \\
+      --image ./art-reference.png \\
+      --prompt "a majestic portrait of a chicken" \\
+      --fidelity 0.5
+
+  # With aspect ratio
+  $ sai control style \\
+      --image ./cinematic-style.jpg \\
+      --prompt "futuristic cityscape" \\
+      --aspect-ratio 16:9 \\
+      --fidelity 0.8
+
+STYLE-TRANSFER - Apply style from one image to another
+  $ sai control style-transfer \\
+      --init-image ./photo.png \\
+      --style-image ./art-style.png
+
+  # With fine control
+  $ sai control style-transfer \\
+      --init-image ./portrait.png \\
+      --style-image ./oil-painting.jpg \\
+      --style-strength 0.8 \\
+      --composition-fidelity 0.95 \\
+      --change-strength 0.7
+
+  # With prompt guidance
+  $ sai control style-transfer \\
+      --init-image ./photo.png \\
+      --style-image ./watercolor.jpg \\
+      --prompt "soft watercolor portrait"
+
+CREDITS:
+  - Sketch: 5 credits
+  - Structure: 5 credits
+  - Style: 5 credits
+  - Style Transfer: 8 credits
 
 ${'='.repeat(60)}
 `);
