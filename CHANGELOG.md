@@ -1,3 +1,10 @@
+## [0.2.1](https://github.com/aself101/stability-ai-api/compare/v0.2.0...v0.2.1) (2025-11-22)
+
+
+### Bug Fixes
+
+* **docs:** add endpoint table, edit examples, and retry docs ([f2df10b](https://github.com/aself101/stability-ai-api/commit/f2df10b480bfe779f98ae7ca7bb52e8428d85203))
+
 # [0.2.0](https://github.com/aself101/stability-ai-api/compare/v0.1.6...v0.2.0) (2025-11-22)
 
 
