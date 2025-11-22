@@ -944,8 +944,12 @@ The Stability AI API has unique response characteristics:
 
 ## Related Packages
 
-- [`bfl-api`](https://github.com/aself101/bfl-api) – FLUX & Kontext
-- [`openai-image-api`](https://github.com/aself101/openai-image-api) – DALL·E & GPT Image 1
+This package is part of the img-gen ecosystem. Check out these other AI generation services:
+
+- [`bfl-api`](https://github.com/aself101/bfl-api) - Black Forest Labs API wrapper for FLUX and Kontext models
+- [`ideogram-api`](https://github.com/aself101/ideogram-api) - Ideogram API wrapper for image generation, editing, remixing, and manipulation
+- [`google-genai-api`](https://github.com/aself101/google-genai-api) - Google Generative AI (Imagen) wrapper
+- [`openai-api`](https://github.com/aself101/openai-api) - OpenAI API wrapper for DALL-E and GPT Image generation
 
 ---
 
