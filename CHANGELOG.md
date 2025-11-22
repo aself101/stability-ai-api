@@ -1,3 +1,10 @@
+# [0.2.0](https://github.com/aself101/stability-ai-api/compare/v0.1.6...v0.2.0) (2025-11-22)
+
+
+### Features
+
+* **edit:** add 7 edit operations with async response handling ([3560255](https://github.com/aself101/stability-ai-api/commit/35602555eca49cb8ad98dde4f0d73d4983cc6747))
+
 ## [0.1.6](https://github.com/aself101/stability-ai-api/compare/v0.1.5...v0.1.6) (2025-11-20)
 
 
