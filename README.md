@@ -87,9 +87,9 @@ The Stability AI API provides access to state-of-the-art image generation and up
 | Stable Image Core | `sai generate core` | `generateCore(options)` | Sync | Fast SDXL successor, style presets |
 | Stable Diffusion 3.5 | `sai generate sd3` | `generateSD3(options)` | Sync | Three variants: large, medium, turbo |
 | **Upscale** |
-| Fast Upscale | `sai upscale fast` | `upscaleFast(image, options)` | Sync | 4x in ~1 second |
+| Fast Upscale | `sai upscale fast` | `upscaleFast(image, options)` | Sync | 4x in ~1 second (input ≤1MP) |
 | Conservative Upscale | `sai upscale conservative` | `upscaleConservative(image, options)` | Sync | 20-40x to 4MP, minimal alteration |
-| Creative Upscale | `sai upscale creative` | `upscaleCreative(image, options)` | Async | 20-40x with creative reimagining |
+| Creative Upscale | `sai upscale creative` | `upscaleCreative(image, options)` | Async | 20-40x with reimagining (input ≤1MP) |
 | **Edit** |
 | Erase | `sai edit erase` | `erase(image, options)` | Sync | Remove objects using mask |
 | Inpaint | `sai edit inpaint` | `inpaint(image, prompt, options)` | Sync | Fill masked area with prompt |
@@ -510,6 +510,8 @@ const result = await api.upscaleFast(
 console.log('Upscaled image size:', result.image.length);
 ```
 
+**Note:** Input image must be ≤1MP (1,048,576 pixels). For larger images, use Conservative Upscale.
+
 #### Conservative Upscale (20-40x to 4MP)
 
 ```javascript
@@ -537,6 +539,8 @@ const result = await api.upscaleCreative('./sketch.jpg', {
 // The method waits until upscaling completes
 console.log('Creative upscale finished:', result.finish_reason);
 ```
+
+**Note:** Input image must be ≤1MP (1,048,576 pixels). For larger images, use Conservative Upscale.
 
 ### Control Methods
 
@@ -1009,20 +1013,22 @@ sai generate core \
 
 ### Upscaling Workflow
 ```bash
-# Fast 4x upscale
+# Fast 4x upscale (input must be ≤1MP)
 sai upscale fast --image ./low_res.jpg
 
-# Conservative 40x upscale with prompt
+# Conservative 40x upscale with prompt (accepts larger images)
 sai upscale conservative \
   --image ./photo.jpg \
   --prompt "enhance facial details"
 
-# Creative upscale with high creativity
+# Creative upscale with high creativity (input must be ≤1MP)
 sai upscale creative \
   --image ./sketch.jpg \
   --prompt "vibrant colors, enhanced details" \
   --creativity 0.5
 ```
+
+**Note:** Fast and Creative upscalers require input ≤1MP (1,048,576 pixels). Conservative accepts larger images.
 
 ### Advanced Options
 ```bash
