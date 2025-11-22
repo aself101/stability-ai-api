@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/stability-ai-api.svg)](https://www.npmjs.com/package/stability-ai-api)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node.js Version](https://img.shields.io/node/v/stability-ai-api)](https://nodejs.org)
-[![Tests](https://img.shields.io/badge/tests-162%20passing-brightgreen)](test/)
+[![Tests](https://img.shields.io/badge/tests-248%20passing-brightgreen)](test/)
 
 A Node.js wrapper for the [Stability AI API](https://platform.stability.ai/docs/api-reference) that provides easy access to Stable Diffusion 3.5 and image upscaling models. Generate stunning AI images and upscale existing ones with professional quality through a simple command-line interface.
 
@@ -59,7 +59,7 @@ console.log('Image saved to:', result.image_path);
 
 The Stability AI API provides access to state-of-the-art image generation and upscaling models. This Node.js service implements:
 
-- **6 Model Endpoints** - Stable Image Ultra, Core, SD3.5 + Fast/Conservative/Creative Upscale
+- **13 Endpoints** - 3 Generate + 3 Upscale + 7 Edit operations
 - **Production Security** - API key redaction, error sanitization, HTTPS enforcement, comprehensive SSRF protection (including IPv4-mapped IPv6 bypass prevention)
 - **DoS Prevention** - Request timeouts (30s API calls), file size limits (50MB), redirect limits
 - **Parameter Validation** - Pre-flight validation catches invalid parameters before API calls
@@ -70,7 +70,7 @@ The Stability AI API provides access to state-of-the-art image generation and up
 - **Image Input Support** - Convert local files to Buffers with validation
 - **Organized Storage** - Structured directories with timestamped files and metadata
 - **CLI Orchestration** - Command-line tool with subcommands for generation and upscaling
-- **Comprehensive Testing** - 162 tests with Vitest for reliability
+- **Comprehensive Testing** - 248 tests with Vitest for reliability
 
 ## Models
 
@@ -141,6 +141,126 @@ Latest SD3.5 models with three variants.
 - `seed` - Random seed (0 to 4,294,967,294)
 - `output_format` - Output format (jpeg, png, webp)
 
+## Edit Operations
+
+7 powerful image editing operations for professional image manipulation.
+
+### Erase
+Remove unwanted objects from images using masks.
+
+**Best for:** Removing blemishes, items, or unwanted elements
+
+**Parameters:**
+- `image` - Input image (required)
+- `mask` - Mask image where white = erase (optional, uses alpha channel if omitted)
+- `grow_mask` - Pixels to expand mask (0-20, default: 5)
+- `seed` - Random seed (0 to 4,294,967,294)
+- `output_format` - Output format (jpeg, png, webp)
+
+### Inpaint
+Fill or replace masked areas with prompt-guided content.
+
+**Best for:** Replacing objects, filling gaps, adding elements
+
+**Parameters:**
+- `image` - Input image (required)
+- `prompt` - What to generate in masked area (required)
+- `mask` - Mask image where white = inpaint (optional)
+- `negative_prompt` - What NOT to generate
+- `grow_mask` - Pixels to expand mask (0-100, default: 5)
+- `style_preset` - Style preset (photographic, anime, cinematic, etc.)
+- `seed` - Random seed (0 to 4,294,967,294)
+- `output_format` - Output format (jpeg, png, webp)
+
+### Outpaint
+Extend image boundaries in any direction.
+
+**Best for:** Expanding compositions, adding context
+
+**Parameters:**
+- `image` - Input image (required)
+- `left`, `right`, `up`, `down` - Pixels to extend (0-2000 each)
+- `creativity` - How creative the outpainting (0-1, default: 0.5)
+- `prompt` - What to generate in extended areas
+- `style_preset` - Style preset
+- `seed` - Random seed (0 to 4,294,967,294)
+- `output_format` - Output format (jpeg, png, webp)
+
+### Search and Replace
+Automatically detect and replace objects using text prompts (no manual masking).
+
+**Best for:** Object replacement without manual mask creation
+
+**Parameters:**
+- `image` - Input image (required)
+- `prompt` - What to replace with (required)
+- `search_prompt` - What to find/replace (required)
+- `negative_prompt` - What NOT to generate
+- `grow_mask` - Pixels to expand auto-detected mask (0-20, default: 3)
+- `style_preset` - Style preset
+- `seed` - Random seed (0 to 4,294,967,294)
+- `output_format` - Output format (jpeg, png, webp)
+
+### Search and Recolor
+Automatically detect and recolor objects using text prompts (no manual masking).
+
+**Best for:** Color changes without manual mask creation
+
+**Parameters:**
+- `image` - Input image (required)
+- `prompt` - Desired color/appearance (required)
+- `select_prompt` - What to find/recolor (required)
+- `negative_prompt` - What NOT to generate
+- `grow_mask` - Pixels to expand auto-detected mask (0-20, default: 3)
+- `style_preset` - Style preset
+- `seed` - Random seed (0 to 4,294,967,294)
+- `output_format` - Output format (jpeg, png, webp)
+
+### Remove Background
+Automatically segment and remove background, returning transparent image.
+
+**Best for:** Product photos, portraits, creating cutouts
+
+**Parameters:**
+- `image` - Input image (required)
+- `output_format` - Output format (**png or webp only** - no jpeg due to transparency)
+
+**Note:** Maximum 4,194,304 pixels (stricter than other operations)
+
+### Replace Background and Relight
+Replace background with AI-generated imagery and adjust lighting (asynchronous).
+
+**Best for:** Studio-quality background replacement, lighting adjustments
+
+**Parameters:**
+- `subject_image` - Input image with subject to keep (required)
+- `background_prompt` - Description of desired background (required if no reference)
+- `background_reference` - Reference image for background style
+- `foreground_prompt` - Description of subject (prevents background bleeding)
+- `negative_prompt` - What NOT to generate
+- `preserve_original_subject` - Subject overlay strength (0-1, default: 0.6)
+- `original_background_depth` - Background depth matching (0-1, default: 0.5)
+- `keep_original_background` - Keep original background, change lighting only
+- `light_source_direction` - Light direction (left, right, above, below)
+- `light_reference` - Reference image for lighting
+- `light_source_strength` - Light intensity (0-1, requires direction or reference)
+- `seed` - Random seed (0 to 4,294,967,294)
+- `output_format` - Output format (jpeg, png, webp)
+
+**Note:** This is the only edit operation that runs asynchronously with polling.
+
+### Style Presets (for applicable operations)
+Available presets: enhance, anime, photographic, digital-art, comic-book, fantasy-art, line-art, analog-film, neon-punk, isometric, low-poly, origami, modeling-compound, cinematic, 3d-model, pixel-art, tile-texture
+
+### Edit Credits
+- Erase: 5 credits
+- Inpaint: 5 credits
+- Outpaint: 4 credits
+- Search & Replace: 5 credits
+- Search & Recolor: 5 credits
+- Remove Background: 5 credits
+- Replace BG & Relight: 8 credits
+
 ## Authentication Setup
 
 ### 1. Get Your API Key
@@ -198,7 +318,7 @@ cd stability-ai-api
 npm install
 
 # Run tests
-npm test  # Run 162 tests
+npm test  # Run 248 tests
 ```
 
 ## Programmatic Usage
@@ -535,6 +655,70 @@ sai generate core \
   --aspect-ratio "16:9"
 ```
 
+### Edit Commands
+
+**Erase Objects:**
+```bash
+sai edit erase \
+  --image ./photo.jpg \
+  --mask ./mask.png \
+  --grow-mask 5
+```
+
+**Inpaint:**
+```bash
+sai edit inpaint \
+  --image ./photo.jpg \
+  --mask ./mask.png \
+  --prompt "blue sky with clouds" \
+  --style-preset photographic
+```
+
+**Outpaint:**
+```bash
+sai edit outpaint \
+  --image ./landscape.jpg \
+  --left 200 --right 200 \
+  --prompt "continuation of landscape" \
+  --creativity 0.5
+```
+
+**Search and Replace:**
+```bash
+sai edit search-replace \
+  --image ./pet.jpg \
+  --search "cat" \
+  --prompt "golden retriever"
+```
+
+**Search and Recolor:**
+```bash
+sai edit search-recolor \
+  --image ./car.jpg \
+  --select "car" \
+  --prompt "bright red metallic paint"
+```
+
+**Remove Background:**
+```bash
+sai edit remove-bg \
+  --image ./portrait.jpg \
+  --output-format png
+```
+
+**Replace Background and Relight:**
+```bash
+sai edit replace-bg \
+  --image ./portrait.jpg \
+  --background-prompt "sunset beach with palm trees" \
+  --light-direction right
+```
+
+**Show Edit Examples:**
+```bash
+sai edit examples
+```
+
 ## Examples
 
 ### Basic Image Generation
@@ -675,7 +859,7 @@ datasets/
 The service includes comprehensive testing:
 
 ```bash
-# Run all tests (162 tests)
+# Run all tests (248 tests)
 npm test
 
 # Watch mode for development
@@ -760,12 +944,8 @@ The Stability AI API has unique response characteristics:
 
 ## Related Packages
 
-This package is part of the img-gen ecosystem. Check out these other AI generation services:
-
-- [`ideogram-api`](https://github.com/aself101/ideogram-api) - Ideogram API wrapper for image generation, editing, remixing, and manipulation
-- [`bfl-api`](https://github.com/aself101/bfl-api) - Black Forest Labs API wrapper for FLUX and Kontext models
-- [`google-genai-api`](https://github.com/aself101/google-genai-api) - Google Generative AI (Imagen) wrapper
-- [`openai-api`](https://github.com/aself101/openai-api) - OpenAI API wrapper for DALL-E and GPT Image generation
+- [`bfl-api`](https://github.com/aself101/bfl-api) – FLUX & Kontext
+- [`openai-image-api`](https://github.com/aself101/openai-image-api) – DALL·E & GPT Image 1
 
 ---
 
@@ -779,5 +959,5 @@ MIT
 
 Contributions welcome! Please ensure all tests pass before submitting PRs:
 ```bash
-npm test  # All 162 tests must pass
+npm test  # All 248 tests must pass
 ```

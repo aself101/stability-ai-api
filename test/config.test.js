@@ -3,10 +3,13 @@
  * Tests for API configuration, endpoints, and constants
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   BASE_URL,
   MODEL_ENDPOINTS,
+  EDIT_ENDPOINTS,
+  EDIT_CONSTRAINTS,
+  STYLE_PRESETS,
   DEFAULT_POLL_INTERVAL,
   DEFAULT_TIMEOUT,
   MAX_RETRIES,
@@ -15,8 +18,11 @@ import {
   getOutputDir,
   getPollInterval,
   getTimeout,
+  getStabilityApiKey,
   validateModelParams,
   getModelConstraints,
+  validateEditParams,
+  getEditConstraints,
   validateApiKeyFormat
 } from '../config.js';
 
@@ -283,6 +289,394 @@ describe('Configuration Functions', () => {
     it('should return null for invalid model', () => {
       const constraints = getModelConstraints('invalid-model');
       expect(constraints).toBeNull();
+    });
+  });
+});
+
+// ==================== Edit Features Tests ====================
+
+describe('Edit Configuration', () => {
+  describe('EDIT_ENDPOINTS', () => {
+    it('should have all 7 edit endpoints defined', () => {
+      expect(EDIT_ENDPOINTS).toBeDefined();
+      expect(Object.keys(EDIT_ENDPOINTS).length).toBe(7);
+    });
+
+    it('should have correct endpoint paths', () => {
+      expect(EDIT_ENDPOINTS['erase']).toBe('/v2beta/stable-image/edit/erase');
+      expect(EDIT_ENDPOINTS['inpaint']).toBe('/v2beta/stable-image/edit/inpaint');
+      expect(EDIT_ENDPOINTS['outpaint']).toBe('/v2beta/stable-image/edit/outpaint');
+      expect(EDIT_ENDPOINTS['search-and-replace']).toBe('/v2beta/stable-image/edit/search-and-replace');
+      expect(EDIT_ENDPOINTS['search-and-recolor']).toBe('/v2beta/stable-image/edit/search-and-recolor');
+      expect(EDIT_ENDPOINTS['remove-background']).toBe('/v2beta/stable-image/edit/remove-background');
+      expect(EDIT_ENDPOINTS['replace-background-and-relight']).toBe('/v2beta/stable-image/edit/replace-background-and-relight');
+    });
+
+    it('should have valid v2beta paths for all endpoints', () => {
+      Object.values(EDIT_ENDPOINTS).forEach(endpoint => {
+        expect(endpoint).toMatch(/^\/v2beta\/stable-image\/edit\//);
+      });
+    });
+  });
+
+  describe('EDIT_CONSTRAINTS', () => {
+    it('should have constraints for all 7 edit operations', () => {
+      expect(EDIT_CONSTRAINTS).toBeDefined();
+      expect(Object.keys(EDIT_CONSTRAINTS).length).toBe(7);
+    });
+
+    it('should have correct erase constraints', () => {
+      const erase = EDIT_CONSTRAINTS['erase'];
+      expect(erase.grow_mask).toEqual({ min: 0, max: 20, default: 5 });
+      expect(erase.seed).toBeDefined();
+      expect(erase.outputFormats).toContain('png');
+    });
+
+    it('should have correct inpaint constraints', () => {
+      const inpaint = EDIT_CONSTRAINTS['inpaint'];
+      expect(inpaint.promptMaxLength).toBe(10000);
+      expect(inpaint.grow_mask).toEqual({ min: 0, max: 100, default: 5 });
+      expect(inpaint.stylePresets).toBeDefined();
+    });
+
+    it('should have correct outpaint constraints', () => {
+      const outpaint = EDIT_CONSTRAINTS['outpaint'];
+      expect(outpaint.direction).toEqual({ min: 0, max: 2000 });
+      expect(outpaint.creativity).toEqual({ min: 0, max: 1, default: 0.5 });
+      expect(outpaint.requiresAspectRatio).toBe(true);
+    });
+
+    it('should have stricter remove-background constraints', () => {
+      const removeBg = EDIT_CONSTRAINTS['remove-background'];
+      expect(removeBg.pixels.max).toBe(4194304); // 4MP max (stricter)
+      expect(removeBg.outputFormats).not.toContain('jpeg'); // No JPEG
+      expect(removeBg.outputFormats).toContain('png');
+      expect(removeBg.outputFormats).toContain('webp');
+    });
+
+    it('should have async flag for replace-background-and-relight', () => {
+      const replaceBg = EDIT_CONSTRAINTS['replace-background-and-relight'];
+      expect(replaceBg.async).toBe(true);
+      expect(replaceBg.light_source_directions).toContain('left');
+      expect(replaceBg.light_source_directions).toContain('right');
+      expect(replaceBg.light_source_directions).toContain('above');
+      expect(replaceBg.light_source_directions).toContain('below');
+    });
+  });
+
+  describe('STYLE_PRESETS', () => {
+    it('should have all 17 style presets', () => {
+      expect(STYLE_PRESETS).toBeDefined();
+      expect(STYLE_PRESETS.length).toBe(17);
+    });
+
+    it('should include common style presets', () => {
+      expect(STYLE_PRESETS).toContain('photographic');
+      expect(STYLE_PRESETS).toContain('anime');
+      expect(STYLE_PRESETS).toContain('cinematic');
+      expect(STYLE_PRESETS).toContain('digital-art');
+      expect(STYLE_PRESETS).toContain('pixel-art');
+      expect(STYLE_PRESETS).toContain('tile-texture');
+    });
+  });
+});
+
+describe('validateEditParams', () => {
+  describe('erase validation', () => {
+    it('should accept valid erase parameters', () => {
+      const result = validateEditParams('erase', {
+        grow_mask: 5,
+        output_format: 'png'
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it('should reject invalid grow_mask for erase', () => {
+      const result = validateEditParams('erase', { grow_mask: 25 }); // Max is 20
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('grow_mask'))).toBe(true);
+    });
+  });
+
+  describe('inpaint validation', () => {
+    it('should accept valid inpaint parameters', () => {
+      const result = validateEditParams('inpaint', {
+        prompt: 'blue sky',
+        grow_mask: 50,
+        style_preset: 'photographic'
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it('should reject prompt exceeding max length', () => {
+      const longPrompt = 'a'.repeat(10001);
+      const result = validateEditParams('inpaint', { prompt: longPrompt });
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('exceeds maximum length'))).toBe(true);
+    });
+
+    it('should reject invalid style preset', () => {
+      const result = validateEditParams('inpaint', { style_preset: 'invalid-style' });
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('Invalid style_preset'))).toBe(true);
+    });
+  });
+
+  describe('outpaint validation', () => {
+    it('should accept valid outpaint parameters', () => {
+      const result = validateEditParams('outpaint', {
+        left: 200,
+        right: 200,
+        creativity: 0.5
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it('should require at least one direction', () => {
+      const result = validateEditParams('outpaint', { creativity: 0.5 });
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('At least one direction'))).toBe(true);
+    });
+
+    it('should reject direction values exceeding 2000', () => {
+      const result = validateEditParams('outpaint', { left: 2500 });
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('left must be between'))).toBe(true);
+    });
+
+    it('should reject creativity out of range', () => {
+      const result = validateEditParams('outpaint', { left: 100, creativity: 1.5 });
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('Creativity must be between'))).toBe(true);
+    });
+  });
+
+  describe('search-and-replace validation', () => {
+    it('should accept valid search-and-replace parameters', () => {
+      const result = validateEditParams('search-and-replace', {
+        prompt: 'golden retriever',
+        search_prompt: 'cat',
+        grow_mask: 3
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it('should reject invalid grow_mask', () => {
+      const result = validateEditParams('search-and-replace', { grow_mask: 25 });
+      expect(result.valid).toBe(false);
+    });
+  });
+
+  describe('search-and-recolor validation', () => {
+    it('should accept valid search-and-recolor parameters', () => {
+      const result = validateEditParams('search-and-recolor', {
+        prompt: 'bright red',
+        select_prompt: 'car',
+        grow_mask: 3
+      });
+      expect(result.valid).toBe(true);
+    });
+  });
+
+  describe('remove-background validation', () => {
+    it('should accept valid remove-background parameters', () => {
+      const result = validateEditParams('remove-background', { output_format: 'png' });
+      expect(result.valid).toBe(true);
+    });
+
+    it('should accept webp output format', () => {
+      const result = validateEditParams('remove-background', { output_format: 'webp' });
+      expect(result.valid).toBe(true);
+    });
+
+    it('should reject jpeg output format', () => {
+      const result = validateEditParams('remove-background', { output_format: 'jpeg' });
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('output_format'))).toBe(true);
+    });
+  });
+
+  describe('replace-background-and-relight validation', () => {
+    it('should accept valid parameters with background_prompt', () => {
+      const result = validateEditParams('replace-background-and-relight', {
+        background_prompt: 'sunset beach',
+        light_source_direction: 'right'
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it('should accept valid parameters with background_reference', () => {
+      const result = validateEditParams('replace-background-and-relight', {
+        background_reference: '/path/to/image.jpg'
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it('should require background_prompt or background_reference', () => {
+      const result = validateEditParams('replace-background-and-relight', {
+        light_source_direction: 'right'
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('background_prompt or background_reference'))).toBe(true);
+    });
+
+    it('should validate light_source_direction values', () => {
+      const result = validateEditParams('replace-background-and-relight', {
+        background_prompt: 'test',
+        light_source_direction: 'invalid'
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('light_source_direction'))).toBe(true);
+    });
+
+    it('should require light_reference or light_source_direction for light_source_strength', () => {
+      const result = validateEditParams('replace-background-and-relight', {
+        background_prompt: 'test',
+        light_source_strength: 0.5
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('light_source_strength requires'))).toBe(true);
+    });
+
+    it('should accept light_source_strength with light_source_direction', () => {
+      const result = validateEditParams('replace-background-and-relight', {
+        background_prompt: 'test',
+        light_source_direction: 'above',
+        light_source_strength: 0.5
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it('should accept light_source_strength with light_reference', () => {
+      const result = validateEditParams('replace-background-and-relight', {
+        background_prompt: 'test',
+        light_reference: '/path/to/light.jpg',
+        light_source_strength: 0.5
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it('should validate preserve_original_subject range', () => {
+      const result = validateEditParams('replace-background-and-relight', {
+        background_prompt: 'test',
+        preserve_original_subject: 1.5
+      });
+      expect(result.valid).toBe(false);
+    });
+
+    it('should validate original_background_depth range', () => {
+      const result = validateEditParams('replace-background-and-relight', {
+        background_prompt: 'test',
+        original_background_depth: -0.5
+      });
+      expect(result.valid).toBe(false);
+    });
+  });
+
+  describe('unknown operation', () => {
+    it('should reject unknown edit operation', () => {
+      const result = validateEditParams('invalid-operation', {});
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('Unknown edit operation'))).toBe(true);
+    });
+  });
+});
+
+describe('getEditConstraints', () => {
+  it('should return constraints for valid edit operation', () => {
+    const constraints = getEditConstraints('inpaint');
+    expect(constraints).toBeDefined();
+    expect(constraints.promptMaxLength).toBe(10000);
+    expect(constraints.grow_mask).toBeDefined();
+  });
+
+  it('should return null for invalid edit operation', () => {
+    const constraints = getEditConstraints('invalid-operation');
+    expect(constraints).toBeNull();
+  });
+});
+
+describe('getStabilityApiKey', () => {
+  const originalEnv = process.env.STABILITY_API_KEY;
+
+  beforeEach(() => {
+    // Clear environment before each test
+    delete process.env.STABILITY_API_KEY;
+  });
+
+  afterEach(() => {
+    // Restore original environment
+    if (originalEnv !== undefined) {
+      process.env.STABILITY_API_KEY = originalEnv;
+    } else {
+      delete process.env.STABILITY_API_KEY;
+    }
+  });
+
+  describe('CLI flag priority', () => {
+    it('should return CLI-provided key when passed', () => {
+      const cliKey = 'cli-provided-api-key-12345';
+      const result = getStabilityApiKey(cliKey);
+      expect(result).toBe(cliKey);
+    });
+
+    it('should prioritize CLI key over environment variable', () => {
+      process.env.STABILITY_API_KEY = 'env-api-key-12345';
+      const cliKey = 'cli-api-key-overrides';
+      const result = getStabilityApiKey(cliKey);
+      expect(result).toBe(cliKey);
+    });
+
+    it('should use CLI key even when it is different format', () => {
+      const cliKey = 'sk-custom-format-key';
+      const result = getStabilityApiKey(cliKey);
+      expect(result).toBe(cliKey);
+    });
+  });
+
+  describe('Environment variable fallback', () => {
+    it('should return env key when no CLI key provided', () => {
+      const envKey = 'env-stability-api-key-98765';
+      process.env.STABILITY_API_KEY = envKey;
+      const result = getStabilityApiKey();
+      expect(result).toBe(envKey);
+    });
+
+    it('should return env key when CLI key is null', () => {
+      const envKey = 'fallback-env-key-54321';
+      process.env.STABILITY_API_KEY = envKey;
+      const result = getStabilityApiKey(null);
+      expect(result).toBe(envKey);
+    });
+
+    it('should return env key when CLI key is undefined', () => {
+      const envKey = 'undefined-fallback-key-11111';
+      process.env.STABILITY_API_KEY = envKey;
+      const result = getStabilityApiKey(undefined);
+      expect(result).toBe(envKey);
+    });
+  });
+
+  describe('Error handling', () => {
+    it('should throw error when no API key available', () => {
+      expect(() => getStabilityApiKey()).toThrow('STABILITY_API_KEY not found');
+    });
+
+    it('should throw error with instructions when key missing', () => {
+      expect(() => getStabilityApiKey()).toThrow('CLI flag');
+      expect(() => getStabilityApiKey()).toThrow('Environment var');
+      expect(() => getStabilityApiKey()).toThrow('Local .env file');
+      expect(() => getStabilityApiKey()).toThrow('Global config');
+      expect(() => getStabilityApiKey()).toThrow('platform.stability.ai');
+    });
+
+    it('should throw error when CLI key is empty string', () => {
+      expect(() => getStabilityApiKey('')).toThrow('STABILITY_API_KEY not found');
+    });
+
+    it('should throw error when env key is empty string', () => {
+      process.env.STABILITY_API_KEY = '';
+      expect(() => getStabilityApiKey()).toThrow('STABILITY_API_KEY not found');
     });
   });
 });

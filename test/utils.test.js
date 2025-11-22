@@ -4,8 +4,9 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi, beforeEach } from 'vitest';
-import { writeFileSync, unlinkSync, mkdirSync, rmdirSync } from 'fs';
+import { writeFileSync, unlinkSync, mkdirSync, rmdirSync, existsSync } from 'fs';
 import { join } from 'path';
+import fs from 'fs/promises';
 
 // Mock DNS module before importing utils
 vi.mock('dns/promises', () => ({
@@ -23,7 +24,11 @@ import {
   buildFormData,
   ensureDirectory,
   writeToFile,
-  readFromFile
+  readFromFile,
+  pause,
+  randomNumber,
+  setLogLevel,
+  fileToBase64
 } from '../utils.js';
 import { validateApiKeyFormat } from '../config.js';
 import { lookup } from 'dns/promises';
@@ -425,119 +430,250 @@ describe('Image Buffer Functions', () => {
 });
 
 describe('File I/O Functions', () => {
-  const testDir = join(process.cwd(), 'test-temp-io');
-  const testJsonFile = join(testDir, 'test-data.json');
-  const testTxtFile = join(testDir, 'test-data.txt');
-  const testBinFile = join(testDir, 'test-data.png');
+  const testDir = join(process.cwd(), 'test-io-temp');
+  const nestedDir = join(testDir, 'nested', 'deep', 'path');
 
   afterAll(async () => {
-    // Cleanup test files
-    const fs = await import('fs/promises');
+    // Clean up test directory
     try {
       await fs.rm(testDir, { recursive: true, force: true });
-    } catch (e) {
-      // Ignore cleanup errors
-    }
+    } catch (e) {}
   });
 
   describe('ensureDirectory', () => {
-    it('should create directory if it does not exist', async () => {
-      const newDir = join(testDir, 'new-subdir', 'nested');
-      await ensureDirectory(newDir);
+    it('should create a directory if it does not exist', async () => {
+      const dirPath = join(testDir, 'ensure-test-1');
+      await ensureDirectory(dirPath);
+      expect(existsSync(dirPath)).toBe(true);
+    });
 
-      const fs = await import('fs/promises');
-      const stat = await fs.stat(newDir);
-      expect(stat.isDirectory()).toBe(true);
+    it('should create nested directories recursively', async () => {
+      const dirPath = join(testDir, 'ensure-test-2', 'level1', 'level2');
+      await ensureDirectory(dirPath);
+      expect(existsSync(dirPath)).toBe(true);
     });
 
     it('should not throw if directory already exists', async () => {
-      await ensureDirectory(testDir);
-      // Should not throw on second call
-      await expect(ensureDirectory(testDir)).resolves.not.toThrow();
+      const dirPath = join(testDir, 'ensure-test-3');
+      await ensureDirectory(dirPath);
+      await expect(ensureDirectory(dirPath)).resolves.not.toThrow();
     });
   });
 
   describe('writeToFile', () => {
-    it('should write JSON data', async () => {
+    it('should write JSON data to file', async () => {
+      const filepath = join(testDir, 'write-test.json');
       const data = { name: 'test', value: 42 };
-      await writeToFile(data, testJsonFile, 'json');
+      await writeToFile(data, filepath);
 
-      const fs = await import('fs/promises');
-      const content = await fs.readFile(testJsonFile, 'utf-8');
+      const content = await fs.readFile(filepath, 'utf-8');
       expect(JSON.parse(content)).toEqual(data);
     });
 
-    it('should write text data', async () => {
-      await writeToFile('Hello World', testTxtFile, 'txt');
+    it('should write text data to file', async () => {
+      const filepath = join(testDir, 'write-test.txt');
+      const data = 'Hello, World!';
+      await writeToFile(data, filepath);
 
-      const fs = await import('fs/promises');
-      const content = await fs.readFile(testTxtFile, 'utf-8');
-      expect(content).toBe('Hello World');
+      const content = await fs.readFile(filepath, 'utf-8');
+      expect(content).toBe(data);
     });
 
-    it('should write binary data', async () => {
-      const buffer = Buffer.from([0x89, 0x50, 0x4E, 0x47]);
-      await writeToFile(buffer, testBinFile, 'binary');
+    it('should write binary data to file', async () => {
+      const filepath = join(testDir, 'write-test.png');
+      const data = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+      await writeToFile(data, filepath);
 
-      const fs = await import('fs/promises');
-      const content = await fs.readFile(testBinFile);
-      expect(Buffer.compare(content, buffer)).toBe(0);
+      const content = await fs.readFile(filepath);
+      expect(content.equals(data)).toBe(true);
+    });
+
+    it('should create parent directories automatically', async () => {
+      const filepath = join(testDir, 'auto-create', 'nested', 'file.json');
+      await writeToFile({ test: true }, filepath);
+
+      expect(existsSync(filepath)).toBe(true);
+    });
+
+    it('should throw error when filepath is not provided', async () => {
+      await expect(writeToFile({ data: 'test' }, null)).rejects.toThrow('Filepath is required');
+      await expect(writeToFile({ data: 'test' }, '')).rejects.toThrow('Filepath is required');
     });
 
     it('should auto-detect JSON format from extension', async () => {
-      const data = { auto: true };
-      const autoJsonFile = join(testDir, 'auto-test.json');
-      await writeToFile(data, autoJsonFile); // No format specified
+      const filepath = join(testDir, 'auto-json.json');
+      const data = { auto: 'detected' };
+      await writeToFile(data, filepath, 'auto');
 
-      const fs = await import('fs/promises');
-      const content = await fs.readFile(autoJsonFile, 'utf-8');
+      const content = await fs.readFile(filepath, 'utf-8');
       expect(JSON.parse(content)).toEqual(data);
     });
 
-    it('should throw if filepath not provided', async () => {
-      await expect(writeToFile({ test: true }, null))
-        .rejects.toThrow('Filepath is required');
+    it('should format JSON with indentation', async () => {
+      const filepath = join(testDir, 'formatted.json');
+      const data = { key: 'value' };
+      await writeToFile(data, filepath);
+
+      const content = await fs.readFile(filepath, 'utf-8');
+      expect(content).toContain('\n'); // Should have newlines from formatting
     });
   });
 
   describe('readFromFile', () => {
+    const readTestDir = join(testDir, 'read-tests');
+
     beforeAll(async () => {
-      // Setup test files
-      const fs = await import('fs/promises');
-      await fs.mkdir(testDir, { recursive: true });
-      await fs.writeFile(join(testDir, 'read-test.json'), '{"key":"value"}');
-      await fs.writeFile(join(testDir, 'read-test.txt'), 'Text content');
-      await fs.writeFile(join(testDir, 'read-test.png'), Buffer.from([0x89, 0x50, 0x4E, 0x47]));
+      await fs.mkdir(readTestDir, { recursive: true });
+
+      // Create test files
+      await fs.writeFile(join(readTestDir, 'test.json'), JSON.stringify({ name: 'test', count: 5 }));
+      await fs.writeFile(join(readTestDir, 'test.txt'), 'Plain text content');
+      await fs.writeFile(join(readTestDir, 'test.png'), Buffer.from([0x89, 0x50, 0x4E, 0x47]));
     });
 
-    it('should read JSON file', async () => {
-      const data = await readFromFile(join(testDir, 'read-test.json'), 'json');
-      expect(data).toEqual({ key: 'value' });
+    it('should read JSON data from file', async () => {
+      const filepath = join(readTestDir, 'test.json');
+      const data = await readFromFile(filepath);
+
+      expect(data).toEqual({ name: 'test', count: 5 });
     });
 
-    it('should read text file', async () => {
-      const data = await readFromFile(join(testDir, 'read-test.txt'), 'txt');
-      expect(data).toBe('Text content');
+    it('should read text data from file', async () => {
+      const filepath = join(readTestDir, 'test.txt');
+      const data = await readFromFile(filepath);
+
+      expect(data).toBe('Plain text content');
     });
 
-    it('should read binary file', async () => {
-      const data = await readFromFile(join(testDir, 'read-test.png'), 'binary');
-      expect(data).toBeInstanceOf(Buffer);
+    it('should read binary data from file', async () => {
+      const filepath = join(readTestDir, 'test.png');
+      const data = await readFromFile(filepath);
+
+      expect(Buffer.isBuffer(data)).toBe(true);
+      expect(data[0]).toBe(0x89);
+      expect(data[1]).toBe(0x50);
+    });
+
+    it('should throw error when filepath is not provided', async () => {
+      await expect(readFromFile(null)).rejects.toThrow('Filepath is required');
+      await expect(readFromFile('')).rejects.toThrow('Filepath is required');
+    });
+
+    it('should throw error for non-existent file', async () => {
+      await expect(readFromFile('/nonexistent/path/file.json')).rejects.toThrow();
     });
 
     it('should auto-detect format from extension', async () => {
-      const data = await readFromFile(join(testDir, 'read-test.json')); // No format
-      expect(data).toEqual({ key: 'value' });
+      const filepath = join(readTestDir, 'test.json');
+      const data = await readFromFile(filepath, 'auto');
+
+      expect(typeof data).toBe('object');
+      expect(data.name).toBe('test');
+    });
+  });
+
+  describe('fileToBase64', () => {
+    const base64TestDir = join(testDir, 'base64-tests');
+
+    beforeAll(async () => {
+      await fs.mkdir(base64TestDir, { recursive: true });
+      await fs.writeFile(join(base64TestDir, 'test.png'), Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A]));
     });
 
-    it('should throw if filepath not provided', async () => {
-      await expect(readFromFile(null))
-        .rejects.toThrow('Filepath is required');
+    it('should convert file to base64 string', async () => {
+      const filepath = join(base64TestDir, 'test.png');
+      const base64 = await fileToBase64(filepath);
+
+      expect(typeof base64).toBe('string');
+      // Verify it's valid base64 by decoding
+      const decoded = Buffer.from(base64, 'base64');
+      expect(decoded[0]).toBe(0x89);
+      expect(decoded[1]).toBe(0x50);
     });
 
-    it('should throw if file does not exist', async () => {
-      await expect(readFromFile(join(testDir, 'nonexistent.json')))
-        .rejects.toThrow();
+    it('should throw error for non-existent file', async () => {
+      await expect(fileToBase64('/nonexistent/image.png')).rejects.toThrow('Failed to read image file');
+    });
+  });
+});
+
+describe('Utility Helper Functions', () => {
+  describe('pause', () => {
+    it('should pause for specified duration', async () => {
+      const start = Date.now();
+      await pause(0.1); // 100ms
+      const elapsed = Date.now() - start;
+
+      expect(elapsed).toBeGreaterThanOrEqual(90); // Allow some tolerance
+      expect(elapsed).toBeLessThan(200);
+    });
+
+    it('should handle zero seconds', async () => {
+      const start = Date.now();
+      await pause(0);
+      const elapsed = Date.now() - start;
+
+      expect(elapsed).toBeLessThan(50);
+    });
+
+    it('should throw error for negative seconds', async () => {
+      expect(() => pause(-1)).toThrow('Seconds cannot be negative');
+    });
+  });
+
+  describe('randomNumber', () => {
+    it('should generate number within range', () => {
+      for (let i = 0; i < 100; i++) {
+        const result = randomNumber(1, 10);
+        expect(result).toBeGreaterThanOrEqual(1);
+        expect(result).toBeLessThanOrEqual(10);
+      }
+    });
+
+    it('should return integer values', () => {
+      for (let i = 0; i < 100; i++) {
+        const result = randomNumber(1, 100);
+        expect(Number.isInteger(result)).toBe(true);
+      }
+    });
+
+    it('should handle same min and max', () => {
+      const result = randomNumber(5, 5);
+      expect(result).toBe(5);
+    });
+
+    it('should throw error when min > max', () => {
+      expect(() => randomNumber(10, 5)).toThrow('cannot be greater than');
+    });
+
+    it('should handle large ranges', () => {
+      const result = randomNumber(0, 1000000);
+      expect(result).toBeGreaterThanOrEqual(0);
+      expect(result).toBeLessThanOrEqual(1000000);
+    });
+
+    it('should handle negative ranges', () => {
+      const result = randomNumber(-10, -1);
+      expect(result).toBeGreaterThanOrEqual(-10);
+      expect(result).toBeLessThanOrEqual(-1);
+    });
+  });
+
+  describe('setLogLevel', () => {
+    it('should accept valid log levels', () => {
+      expect(() => setLogLevel('debug')).not.toThrow();
+      expect(() => setLogLevel('info')).not.toThrow();
+      expect(() => setLogLevel('warn')).not.toThrow();
+      expect(() => setLogLevel('error')).not.toThrow();
+    });
+
+    it('should handle uppercase input', () => {
+      expect(() => setLogLevel('DEBUG')).not.toThrow();
+      expect(() => setLogLevel('INFO')).not.toThrow();
+    });
+
+    it('should handle mixed case input', () => {
+      expect(() => setLogLevel('DeBuG')).not.toThrow();
     });
   });
 });

@@ -18,7 +18,7 @@
 
 import axios from 'axios';
 import { logger, buildFormData, createSpinner } from './utils.js';
-import { BASE_URL, MODEL_ENDPOINTS, DEFAULT_POLL_INTERVAL, DEFAULT_TIMEOUT } from './config.js';
+import { BASE_URL, MODEL_ENDPOINTS, EDIT_ENDPOINTS, DEFAULT_POLL_INTERVAL, DEFAULT_TIMEOUT } from './config.js';
 
 /**
  * Stability AI API Client
@@ -136,13 +136,15 @@ export class StabilityAPI {
         Object.assign(headers, formData.getHeaders());
       }
 
+      // Extract headers from options to avoid overwriting merged headers
+      const { headers: _, ...restOptions } = options;
       const axiosConfig = {
         method,
         url,
         headers,
         timeout: 30000, // 30 second timeout for API requests
         maxRedirects: 5,
-        ...options
+        ...restOptions
       };
 
       // Add form data for POST requests
@@ -150,8 +152,9 @@ export class StabilityAPI {
         axiosConfig.data = formData;
       }
 
-      // For image responses, we want binary data
-      if (headers['accept'] === 'image/*') {
+      // For binary responses, we want arraybuffer
+      // Both 'image/*' and '*/*' expect binary data
+      if (headers['accept'] === 'image/*' || headers['accept'] === '*/*') {
         axiosConfig.responseType = 'arraybuffer';
       }
 
@@ -175,6 +178,17 @@ export class StabilityAPI {
         // Async response with task ID
         logger.info('Received async task ID');
         return response.data;
+      } else if (response.status === 200 && response.headers['content-type']?.includes('application/json')) {
+        // Async endpoint returning task ID with HTTP 200 (e.g., replace-background-and-relight)
+        // Parse JSON from arraybuffer if needed
+        let data = response.data;
+        if (Buffer.isBuffer(data) || data instanceof ArrayBuffer) {
+          data = JSON.parse(Buffer.from(data).toString('utf8'));
+        }
+        if (data.id) {
+          logger.info(`Received async task ID: ${data.id}`);
+        }
+        return data;
       } else {
         // Other responses
         return response.data;
@@ -306,7 +320,10 @@ export class StabilityAPI {
    */
   async getResult(taskId) {
     const endpoint = `${MODEL_ENDPOINTS.results}/${taskId}`;
-    return await this._makeFormDataRequest('GET', endpoint);
+    // Results endpoint requires accept: */* for binary response
+    return await this._makeFormDataRequest('GET', endpoint, null, {
+      headers: { 'accept': '*/*' }
+    });
   }
 
   /**
@@ -527,6 +544,305 @@ export class StabilityAPI {
       logger.error(`Error fetching balance: ${this._sanitizeErrorMessage(error)}`);
       throw new Error(this._sanitizeErrorMessage(error));
     }
+  }
+
+  // ==================== Edit Methods ====================
+
+  /**
+   * Erase objects from an image using a mask.
+   * Removes unwanted objects like blemishes, items on desks, etc.
+   *
+   * @param {string} image - Path to input image or URL
+   * @param {Object} [options={}] - Erase options
+   * @param {string} [options.mask] - Path to mask image (white=erase). If omitted, uses image alpha channel
+   * @param {number} [options.grow_mask=5] - Pixels to grow mask edges (0-20)
+   * @param {number} [options.seed] - Random seed (0-4294967294)
+   * @param {string} [options.output_format='png'] - Output format (jpeg, png, webp)
+   * @returns {Promise<Object>} Erased image result with image buffer
+   *
+   * @example
+   * const result = await api.erase('/path/to/photo.png', { mask: '/path/to/mask.png' });
+   * const result = await api.erase('/path/to/photo-with-alpha.png'); // uses alpha channel
+   */
+  async erase(image, options = {}) {
+    logger.info('Erasing objects from image');
+
+    const fileInputs = { image };
+    if (options.mask) {
+      fileInputs.mask = options.mask;
+    }
+
+    const formData = await buildFormData(
+      {
+        grow_mask: options.grow_mask,
+        seed: options.seed,
+        output_format: options.output_format || 'png'
+      },
+      fileInputs
+    );
+
+    return await this._makeFormDataRequest('POST', EDIT_ENDPOINTS['erase'], formData);
+  }
+
+  /**
+   * Inpaint (fill or replace) masked areas with prompt-guided content.
+   *
+   * @param {string} image - Path to input image or URL
+   * @param {string} prompt - What to generate in masked area (1-10000 chars)
+   * @param {Object} [options={}] - Inpaint options
+   * @param {string} [options.mask] - Path to mask image (white=inpaint). If omitted, uses alpha channel
+   * @param {string} [options.negative_prompt] - What NOT to generate
+   * @param {number} [options.grow_mask=5] - Pixels to grow mask edges (0-100)
+   * @param {number} [options.seed] - Random seed (0-4294967294)
+   * @param {string} [options.output_format='png'] - Output format (jpeg, png, webp)
+   * @param {string} [options.style_preset] - Style preset (e.g., 'photographic', 'anime')
+   * @returns {Promise<Object>} Inpainted image result with image buffer
+   *
+   * @example
+   * const result = await api.inpaint('/path/to/photo.png', 'blue sky with clouds', { mask: '/path/to/mask.png' });
+   */
+  async inpaint(image, prompt, options = {}) {
+    logger.info('Inpainting image with prompt');
+
+    const fileInputs = { image };
+    if (options.mask) {
+      fileInputs.mask = options.mask;
+    }
+
+    const formData = await buildFormData(
+      {
+        prompt,
+        negative_prompt: options.negative_prompt,
+        grow_mask: options.grow_mask,
+        seed: options.seed,
+        output_format: options.output_format || 'png',
+        style_preset: options.style_preset
+      },
+      fileInputs
+    );
+
+    return await this._makeFormDataRequest('POST', EDIT_ENDPOINTS['inpaint'], formData);
+  }
+
+  /**
+   * Outpaint (extend) image boundaries in any direction.
+   *
+   * @param {string} image - Path to input image or URL
+   * @param {Object} [options={}] - Outpaint options
+   * @param {number} [options.left=0] - Pixels to extend left (0-2000)
+   * @param {number} [options.right=0] - Pixels to extend right (0-2000)
+   * @param {number} [options.up=0] - Pixels to extend up (0-2000)
+   * @param {number} [options.down=0] - Pixels to extend down (0-2000)
+   * @param {number} [options.creativity=0.5] - How creative the outpainting should be (0-1)
+   * @param {string} [options.prompt] - What to generate in extended areas
+   * @param {number} [options.seed] - Random seed (0-4294967294)
+   * @param {string} [options.output_format='png'] - Output format (jpeg, png, webp)
+   * @param {string} [options.style_preset] - Style preset (e.g., 'photographic', 'anime')
+   * @returns {Promise<Object>} Outpainted image result with image buffer
+   *
+   * @example
+   * const result = await api.outpaint('/path/to/photo.png', { left: 200, right: 200 });
+   * const result = await api.outpaint('/path/to/photo.png', { up: 500, prompt: 'blue sky' });
+   */
+  async outpaint(image, options = {}) {
+    logger.info('Outpainting image');
+
+    const formData = await buildFormData(
+      {
+        left: options.left,
+        right: options.right,
+        up: options.up,
+        down: options.down,
+        creativity: options.creativity,
+        prompt: options.prompt,
+        seed: options.seed,
+        output_format: options.output_format || 'png',
+        style_preset: options.style_preset
+      },
+      { image }
+    );
+
+    return await this._makeFormDataRequest('POST', EDIT_ENDPOINTS['outpaint'], formData);
+  }
+
+  /**
+   * Search and replace objects using text prompts (no manual masking needed).
+   *
+   * @param {string} image - Path to input image or URL
+   * @param {string} prompt - What to replace with (1-10000 chars)
+   * @param {string} searchPrompt - Short description of what to find
+   * @param {Object} [options={}] - Search and replace options
+   * @param {string} [options.negative_prompt] - What NOT to generate
+   * @param {number} [options.grow_mask=3] - Pixels to grow auto-detected mask (0-20)
+   * @param {number} [options.seed] - Random seed (0-4294967294)
+   * @param {string} [options.output_format='png'] - Output format (jpeg, png, webp)
+   * @param {string} [options.style_preset] - Style preset (e.g., 'photographic', 'anime')
+   * @returns {Promise<Object>} Modified image result with image buffer
+   *
+   * @example
+   * const result = await api.searchAndReplace('/path/to/photo.png', 'golden retriever', 'cat');
+   */
+  async searchAndReplace(image, prompt, searchPrompt, options = {}) {
+    logger.info(`Searching for "${searchPrompt}" and replacing with "${prompt}"`);
+
+    const formData = await buildFormData(
+      {
+        prompt,
+        search_prompt: searchPrompt,
+        negative_prompt: options.negative_prompt,
+        grow_mask: options.grow_mask,
+        seed: options.seed,
+        output_format: options.output_format || 'png',
+        style_preset: options.style_preset
+      },
+      { image }
+    );
+
+    return await this._makeFormDataRequest('POST', EDIT_ENDPOINTS['search-and-replace'], formData);
+  }
+
+  /**
+   * Search and recolor objects using text prompts (no manual masking needed).
+   *
+   * @param {string} image - Path to input image or URL
+   * @param {string} prompt - Desired color/appearance (1-10000 chars)
+   * @param {string} selectPrompt - Short description of what to find
+   * @param {Object} [options={}] - Search and recolor options
+   * @param {string} [options.negative_prompt] - What NOT to generate
+   * @param {number} [options.grow_mask=3] - Pixels to grow auto-detected mask (0-20)
+   * @param {number} [options.seed] - Random seed (0-4294967294)
+   * @param {string} [options.output_format='png'] - Output format (jpeg, png, webp)
+   * @param {string} [options.style_preset] - Style preset (e.g., 'photographic', 'anime')
+   * @returns {Promise<Object>} Recolored image result with image buffer
+   *
+   * @example
+   * const result = await api.searchAndRecolor('/path/to/photo.png', 'bright red', 'car');
+   */
+  async searchAndRecolor(image, prompt, selectPrompt, options = {}) {
+    logger.info(`Searching for "${selectPrompt}" and recoloring to "${prompt}"`);
+
+    const formData = await buildFormData(
+      {
+        prompt,
+        select_prompt: selectPrompt,
+        negative_prompt: options.negative_prompt,
+        grow_mask: options.grow_mask,
+        seed: options.seed,
+        output_format: options.output_format || 'png',
+        style_preset: options.style_preset
+      },
+      { image }
+    );
+
+    return await this._makeFormDataRequest('POST', EDIT_ENDPOINTS['search-and-recolor'], formData);
+  }
+
+  /**
+   * Remove background from image (automatic segmentation).
+   * Returns image with transparent background.
+   *
+   * @param {string} image - Path to input image or URL
+   * @param {Object} [options={}] - Remove background options
+   * @param {string} [options.output_format='png'] - Output format (png or webp only, NO jpeg)
+   * @returns {Promise<Object>} Image with transparent background
+   *
+   * @example
+   * const result = await api.removeBackground('/path/to/photo.png');
+   * const result = await api.removeBackground('/path/to/photo.jpg', { output_format: 'webp' });
+   */
+  async removeBackground(image, options = {}) {
+    logger.info('Removing background from image');
+
+    // Remove background doesn't support jpeg (needs transparency)
+    const outputFormat = options.output_format || 'png';
+    if (outputFormat === 'jpeg') {
+      throw new Error('Remove background does not support jpeg output format (requires transparency). Use png or webp.');
+    }
+
+    const formData = await buildFormData(
+      { output_format: outputFormat },
+      { image }
+    );
+
+    return await this._makeFormDataRequest('POST', EDIT_ENDPOINTS['remove-background'], formData);
+  }
+
+  /**
+   * Replace background and relight subject with AI-generated or reference imagery.
+   * This is an ASYNCHRONOUS operation that returns a task ID.
+   *
+   * @param {string} subjectImage - Path to image with subject to keep
+   * @param {Object} [options={}] - Replace background options
+   * @param {string} [options.background_prompt] - Description of desired background (required if no background_reference)
+   * @param {string} [options.background_reference] - Path to reference image for background style
+   * @param {string} [options.foreground_prompt] - Description of subject (prevents background bleeding)
+   * @param {string} [options.negative_prompt] - What NOT to generate
+   * @param {number} [options.preserve_original_subject=0.6] - Subject overlay strength (0-1, 1.0=pixel perfect)
+   * @param {number} [options.original_background_depth=0.5] - Background depth matching (0-1)
+   * @param {boolean} [options.keep_original_background=false] - Keep original BG with new lighting only
+   * @param {string} [options.light_source_direction] - Direction of light ('left', 'right', 'above', 'below')
+   * @param {string} [options.light_reference] - Path to reference image for lighting
+   * @param {number} [options.light_source_strength=0.3] - Light intensity (0-1, requires light_reference or light_source_direction)
+   * @param {number} [options.seed] - Random seed (0-4294967294)
+   * @param {string} [options.output_format='png'] - Output format (jpeg, png, webp)
+   * @param {boolean} [options.wait=true] - Wait for result with auto-polling
+   * @returns {Promise<Object>} Task object or final result if wait=true
+   *
+   * @example
+   * const result = await api.replaceBackgroundAndRelight('/path/to/portrait.png', {
+   *   background_prompt: 'sunset beach with palm trees',
+   *   light_source_direction: 'right'
+   * });
+   */
+  async replaceBackgroundAndRelight(subjectImage, options = {}) {
+    logger.info('Replacing background and relighting subject (async)');
+
+    // Validate either background_prompt or background_reference is provided
+    if (!options.background_prompt && !options.background_reference) {
+      throw new Error('Either background_prompt or background_reference is required for replace background and relight');
+    }
+
+    // Validate light_source_strength dependency
+    if (options.light_source_strength !== undefined &&
+        !options.light_reference && !options.light_source_direction) {
+      throw new Error('light_source_strength requires either light_reference or light_source_direction');
+    }
+
+    const fileInputs = { subject_image: subjectImage };
+    if (options.background_reference) {
+      fileInputs.background_reference = options.background_reference;
+    }
+    if (options.light_reference) {
+      fileInputs.light_reference = options.light_reference;
+    }
+
+    const formData = await buildFormData(
+      {
+        background_prompt: options.background_prompt,
+        foreground_prompt: options.foreground_prompt,
+        negative_prompt: options.negative_prompt,
+        preserve_original_subject: options.preserve_original_subject,
+        original_background_depth: options.original_background_depth,
+        keep_original_background: options.keep_original_background !== undefined
+          ? String(options.keep_original_background)
+          : undefined,
+        light_source_direction: options.light_source_direction,
+        light_source_strength: options.light_source_strength,
+        seed: options.seed,
+        output_format: options.output_format || 'png'
+      },
+      fileInputs
+    );
+
+    const task = await this._makeFormDataRequest('POST', EDIT_ENDPOINTS['replace-background-and-relight'], formData);
+
+    // If wait is enabled (default), poll for result
+    if (options.wait !== false && task.id) {
+      logger.info(`Got task ID: ${task.id}, waiting for result...`);
+      return await this.waitForResult(task.id);
+    }
+
+    return task;
   }
 }
 
