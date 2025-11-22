@@ -26,6 +26,10 @@ sai generate ultra --prompt "a serene mountain landscape"
 sai upscale fast --image ./photo.jpg
 ```
 
+### Demo
+
+[![asciicast](https://asciinema.org/a/03JPG9PhL5GGopR6yhaMCpmmu.svg)](https://asciinema.org/a/03JPG9PhL5GGopR6yhaMCpmmu)
+
 ### Programmatic Usage
 ```javascript
 import { StabilityAPI } from 'stability-ai-api';
