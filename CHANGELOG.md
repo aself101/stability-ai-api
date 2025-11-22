@@ -1,3 +1,10 @@
+## [0.3.1](https://github.com/aself101/stability-ai-api/compare/v0.3.0...v0.3.1) (2025-11-22)
+
+
+### Bug Fixes
+
+* **asciidemo:** add asciinema demo to README ([ccc9b4b](https://github.com/aself101/stability-ai-api/commit/ccc9b4bb2019f99e7e5b22962e6471697cc4e89a))
+
 # [0.3.0](https://github.com/aself101/stability-ai-api/compare/v0.2.1...v0.3.0) (2025-11-22)
 
 
