@@ -72,6 +72,29 @@ The Stability AI API provides access to state-of-the-art image generation and up
 - **CLI Orchestration** - Command-line tool with subcommands for generation and upscaling
 - **Comprehensive Testing** - 248 tests with Vitest for reliability
 
+### Endpoint Summary
+
+| Operation | CLI Command | API Method | Sync/Async | Notes |
+|-----------|-------------|------------|------------|-------|
+| **Generate** |
+| Stable Image Ultra | `sai generate ultra` | `generateUltra(options)` | Sync | Photorealistic 1MP, optional image-to-image |
+| Stable Image Core | `sai generate core` | `generateCore(options)` | Sync | Fast SDXL successor, style presets |
+| Stable Diffusion 3.5 | `sai generate sd3` | `generateSD3(options)` | Sync | Three variants: large, medium, turbo |
+| **Upscale** |
+| Fast Upscale | `sai upscale fast` | `upscaleFast(image, options)` | Sync | 4x in ~1 second |
+| Conservative Upscale | `sai upscale conservative` | `upscaleConservative(image, options)` | Sync | 20-40x to 4MP, minimal alteration |
+| Creative Upscale | `sai upscale creative` | `upscaleCreative(image, options)` | Async | 20-40x with creative reimagining |
+| **Edit** |
+| Erase | `sai edit erase` | `erase(image, options)` | Sync | Remove objects using mask |
+| Inpaint | `sai edit inpaint` | `inpaint(image, prompt, options)` | Sync | Fill masked area with prompt |
+| Outpaint | `sai edit outpaint` | `outpaint(image, options)` | Sync | Extend image boundaries |
+| Search & Replace | `sai edit search-replace` | `searchAndReplace(image, prompt, search, options)` | Sync | Replace objects by description |
+| Search & Recolor | `sai edit search-recolor` | `searchAndRecolor(image, prompt, select, options)` | Sync | Recolor selected objects |
+| Remove Background | `sai edit remove-bg` | `removeBackground(image, options)` | Sync | Extract subject from background |
+| Replace Background | `sai edit replace-bg` | `replaceBackgroundAndRelight(image, options)` | Sync | New background with relighting |
+
+**Note:** All API methods use `snake_case` parameters to match the Stability AI HTTP API (e.g., `aspect_ratio`, `output_format`, `style_preset`).
+
 ## Models
 
 ### Stable Image Ultra
@@ -540,6 +563,52 @@ await writeToFile(upscaled.image, './step3_final_4k.png');
 console.log('✓ Pipeline complete!');
 ```
 
+### Complete Example: Edit Operations
+
+```javascript
+import { StabilityAPI } from 'stability-ai-api';
+import { writeToFile } from 'stability-ai-api/utils';
+
+const api = new StabilityAPI();
+
+// Erase an object using a mask
+const erased = await api.erase('./photo.jpg', {
+  mask: './mask.png',      // White = areas to erase
+  grow_mask: 5,            // Expand mask by 5 pixels
+  output_format: 'png'
+});
+await writeToFile(erased.image, './erased.png');
+
+// Inpaint: fill masked area with new content
+const inpainted = await api.inpaint('./scene.jpg', 'a golden retriever', {
+  mask: './dog_mask.png',  // White = area to fill
+  negative_prompt: 'blurry, distorted',
+  output_format: 'png'
+});
+await writeToFile(inpainted.image, './inpainted.png');
+
+// Outpaint: extend image boundaries
+const outpainted = await api.outpaint('./landscape.jpg', {
+  left: 200,               // Extend 200px left
+  right: 200,              // Extend 200px right
+  creativity: 0.5,         // Balance between original and generated
+  prompt: 'continue the mountain scenery'
+});
+await writeToFile(outpainted.image, './outpainted.png');
+
+// Search and Replace: swap objects by description
+const replaced = await api.searchAndReplace('./pet.jpg', 'a tabby cat', 'dog', {
+  output_format: 'png'
+});
+await writeToFile(replaced.image, './cat_instead.png');
+
+// Remove Background: extract subject
+const noBg = await api.removeBackground('./portrait.jpg', {
+  output_format: 'png'     // PNG preserves transparency
+});
+await writeToFile(noBg.image, './subject_only.png');
+```
+
 ### Error Handling
 
 ```javascript
@@ -564,6 +633,34 @@ try {
   } else {
     console.error('Generation failed:', error.message);
   }
+}
+```
+
+### Retry Behavior
+
+The API includes automatic retry logic for transient errors:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Max Retries | 3 | Number of retry attempts before failing |
+| Backoff | Exponential | 1s → 2s → 4s between retries |
+| Retry On | `502`, `503`, `504`, network errors | Transient/temporary failures |
+| No Retry | `400`, `401`, `402`, `422`, `429` | Permanent errors (bad request, auth, rate limit) |
+
+```javascript
+// Configure retry behavior for async operations
+const result = await api.waitForResult(taskId, {
+  maxRetries: 5,       // Override default retry count
+  pollInterval: 3,     // Seconds between polls
+  timeout: 600         // Max wait time in seconds
+});
+
+// Disable retries by catching and not retrying
+try {
+  const result = await api.generateUltra({ prompt: 'test' });
+} catch (error) {
+  // Handle without retry
+  console.error('Failed:', error.message);
 }
 ```
 
@@ -965,3 +1062,7 @@ Contributions welcome! Please ensure all tests pass before submitting PRs:
 ```bash
 npm test  # All 248 tests must pass
 ```
+
+---
+
+Thankee-sai.
