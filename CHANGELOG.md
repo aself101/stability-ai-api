@@ -1,3 +1,10 @@
+# [0.3.0](https://github.com/aself101/stability-ai-api/compare/v0.2.1...v0.3.0) (2025-11-22)
+
+
+### Features
+
+* **control:** add 4 control operations for image manipulation ([babd213](https://github.com/aself101/stability-ai-api/commit/babd21375858cb8b936f997be7044457ce965cd5))
+
 ## [0.2.1](https://github.com/aself101/stability-ai-api/compare/v0.2.0...v0.2.1) (2025-11-22)
 
 
