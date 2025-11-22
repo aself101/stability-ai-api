@@ -9,6 +9,8 @@ import {
   MODEL_ENDPOINTS,
   EDIT_ENDPOINTS,
   EDIT_CONSTRAINTS,
+  CONTROL_ENDPOINTS,
+  CONTROL_CONSTRAINTS,
   STYLE_PRESETS,
   DEFAULT_POLL_INTERVAL,
   DEFAULT_TIMEOUT,
@@ -23,6 +25,8 @@ import {
   getModelConstraints,
   validateEditParams,
   getEditConstraints,
+  validateControlParams,
+  getControlConstraints,
   validateApiKeyFormat
 } from '../config.js';
 
@@ -677,6 +681,253 @@ describe('getStabilityApiKey', () => {
     it('should throw error when env key is empty string', () => {
       process.env.STABILITY_API_KEY = '';
       expect(() => getStabilityApiKey()).toThrow('STABILITY_API_KEY not found');
+    });
+  });
+});
+
+// ==================== Control Endpoints Tests ====================
+
+describe('Control Endpoints', () => {
+  it('should have sketch endpoint', () => {
+    expect(CONTROL_ENDPOINTS['sketch']).toBe('/v2beta/stable-image/control/sketch');
+  });
+
+  it('should have structure endpoint', () => {
+    expect(CONTROL_ENDPOINTS['structure']).toBe('/v2beta/stable-image/control/structure');
+  });
+
+  it('should have style endpoint', () => {
+    expect(CONTROL_ENDPOINTS['style']).toBe('/v2beta/stable-image/control/style');
+  });
+
+  it('should have style-transfer endpoint', () => {
+    expect(CONTROL_ENDPOINTS['style-transfer']).toBe('/v2beta/stable-image/control/style-transfer');
+  });
+});
+
+describe('Control Constraints', () => {
+  it('should have sketch constraints', () => {
+    expect(CONTROL_CONSTRAINTS['sketch']).toBeDefined();
+    expect(CONTROL_CONSTRAINTS['sketch'].control_strength).toEqual({ min: 0, max: 1, default: 0.7 });
+    expect(CONTROL_CONSTRAINTS['sketch'].stylePresets).toEqual(STYLE_PRESETS);
+  });
+
+  it('should have structure constraints', () => {
+    expect(CONTROL_CONSTRAINTS['structure']).toBeDefined();
+    expect(CONTROL_CONSTRAINTS['structure'].control_strength).toEqual({ min: 0, max: 1, default: 0.7 });
+    expect(CONTROL_CONSTRAINTS['structure'].outputFormats).toEqual(OUTPUT_FORMATS);
+  });
+
+  it('should have style constraints with fidelity', () => {
+    expect(CONTROL_CONSTRAINTS['style']).toBeDefined();
+    expect(CONTROL_CONSTRAINTS['style'].fidelity).toEqual({ min: 0, max: 1, default: 0.5 });
+    expect(CONTROL_CONSTRAINTS['style'].aspectRatios).toEqual(ASPECT_RATIOS);
+  });
+
+  it('should have style-transfer constraints', () => {
+    expect(CONTROL_CONSTRAINTS['style-transfer']).toBeDefined();
+    expect(CONTROL_CONSTRAINTS['style-transfer'].style_strength).toEqual({ min: 0, max: 1, default: 1 });
+    expect(CONTROL_CONSTRAINTS['style-transfer'].composition_fidelity).toEqual({ min: 0, max: 1, default: 0.9 });
+    expect(CONTROL_CONSTRAINTS['style-transfer'].change_strength).toEqual({ min: 0.1, max: 1, default: 0.9 });
+  });
+});
+
+describe('getControlConstraints', () => {
+  it('should return constraints for sketch', () => {
+    const constraints = getControlConstraints('sketch');
+    expect(constraints).toBeDefined();
+    expect(constraints.control_strength).toBeDefined();
+  });
+
+  it('should return constraints for structure', () => {
+    const constraints = getControlConstraints('structure');
+    expect(constraints).toBeDefined();
+    expect(constraints.control_strength).toBeDefined();
+  });
+
+  it('should return constraints for style', () => {
+    const constraints = getControlConstraints('style');
+    expect(constraints).toBeDefined();
+    expect(constraints.fidelity).toBeDefined();
+  });
+
+  it('should return constraints for style-transfer', () => {
+    const constraints = getControlConstraints('style-transfer');
+    expect(constraints).toBeDefined();
+    expect(constraints.style_strength).toBeDefined();
+  });
+
+  it('should return null for unknown operation', () => {
+    const constraints = getControlConstraints('unknown');
+    expect(constraints).toBeNull();
+  });
+});
+
+describe('validateControlParams', () => {
+  describe('Sketch Operation', () => {
+    it('should validate valid sketch parameters', () => {
+      const result = validateControlParams('sketch', {
+        prompt: 'medieval castle',
+        control_strength: 0.7,
+        output_format: 'png'
+      });
+      expect(result.valid).toBe(true);
+      expect(result.errors).toHaveLength(0);
+    });
+
+    it('should reject control_strength out of range (too high)', () => {
+      const result = validateControlParams('sketch', { control_strength: 1.5 });
+      expect(result.valid).toBe(false);
+      expect(result.errors[0]).toContain('control_strength');
+    });
+
+    it('should reject control_strength out of range (negative)', () => {
+      const result = validateControlParams('sketch', { control_strength: -0.1 });
+      expect(result.valid).toBe(false);
+      expect(result.errors[0]).toContain('control_strength');
+    });
+
+    it('should reject invalid style_preset', () => {
+      const result = validateControlParams('sketch', { style_preset: 'invalid-style' });
+      expect(result.valid).toBe(false);
+      expect(result.errors[0]).toContain('style_preset');
+    });
+  });
+
+  describe('Structure Operation', () => {
+    it('should validate valid structure parameters', () => {
+      const result = validateControlParams('structure', {
+        prompt: 'garden shrub',
+        control_strength: 0.6,
+        seed: 42
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it('should reject prompt exceeding max length', () => {
+      const longPrompt = 'a'.repeat(10001);
+      const result = validateControlParams('structure', { prompt: longPrompt });
+      expect(result.valid).toBe(false);
+      expect(result.errors[0]).toContain('Prompt exceeds');
+    });
+
+    it('should reject invalid output_format', () => {
+      const result = validateControlParams('structure', { output_format: 'bmp' });
+      expect(result.valid).toBe(false);
+      expect(result.errors[0]).toContain('output_format');
+    });
+  });
+
+  describe('Style Operation', () => {
+    it('should validate valid style parameters', () => {
+      const result = validateControlParams('style', {
+        prompt: 'portrait of a chicken',
+        fidelity: 0.8,
+        aspect_ratio: '16:9'
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it('should reject fidelity out of range (too high)', () => {
+      const result = validateControlParams('style', { fidelity: 1.5 });
+      expect(result.valid).toBe(false);
+      expect(result.errors[0]).toContain('fidelity');
+    });
+
+    it('should reject fidelity out of range (negative)', () => {
+      const result = validateControlParams('style', { fidelity: -0.1 });
+      expect(result.valid).toBe(false);
+      expect(result.errors[0]).toContain('fidelity');
+    });
+
+    it('should reject invalid aspect_ratio', () => {
+      const result = validateControlParams('style', { aspect_ratio: '5:3' });
+      expect(result.valid).toBe(false);
+      expect(result.errors[0]).toContain('aspect_ratio');
+    });
+
+    it('should accept valid aspect_ratio', () => {
+      const result = validateControlParams('style', { aspect_ratio: '16:9' });
+      expect(result.valid).toBe(true);
+    });
+  });
+
+  describe('Style Transfer Operation', () => {
+    it('should validate valid style-transfer parameters', () => {
+      const result = validateControlParams('style-transfer', {
+        style_strength: 0.8,
+        composition_fidelity: 0.95,
+        change_strength: 0.7
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it('should validate minimal style-transfer parameters', () => {
+      const result = validateControlParams('style-transfer', {});
+      expect(result.valid).toBe(true);
+    });
+
+    it('should reject style_strength out of range', () => {
+      const result = validateControlParams('style-transfer', { style_strength: 1.5 });
+      expect(result.valid).toBe(false);
+      expect(result.errors[0]).toContain('style_strength');
+    });
+
+    it('should reject composition_fidelity out of range', () => {
+      const result = validateControlParams('style-transfer', { composition_fidelity: -0.1 });
+      expect(result.valid).toBe(false);
+      expect(result.errors[0]).toContain('composition_fidelity');
+    });
+
+    it('should reject change_strength below minimum', () => {
+      const result = validateControlParams('style-transfer', { change_strength: 0.05 });
+      expect(result.valid).toBe(false);
+      expect(result.errors[0]).toContain('change_strength');
+    });
+
+    it('should reject change_strength above maximum', () => {
+      const result = validateControlParams('style-transfer', { change_strength: 1.5 });
+      expect(result.valid).toBe(false);
+      expect(result.errors[0]).toContain('change_strength');
+    });
+
+    it('should accept optional prompt', () => {
+      const result = validateControlParams('style-transfer', {
+        prompt: 'watercolor style'
+      });
+      expect(result.valid).toBe(true);
+    });
+  });
+
+  describe('Common Validations', () => {
+    it('should reject unknown control operation', () => {
+      const result = validateControlParams('unknown-control', {});
+      expect(result.valid).toBe(false);
+      expect(result.errors[0]).toContain('Unknown control operation');
+    });
+
+    it('should validate seed range for all operations', () => {
+      const operations = ['sketch', 'structure', 'style', 'style-transfer'];
+      for (const op of operations) {
+        const result = validateControlParams(op, { seed: 4294967295 });
+        expect(result.valid).toBe(false);
+        expect(result.errors[0]).toContain('Seed');
+      }
+    });
+
+    it('should accept valid seed for all operations', () => {
+      const operations = ['sketch', 'structure', 'style', 'style-transfer'];
+      for (const op of operations) {
+        const result = validateControlParams(op, { seed: 42 });
+        expect(result.valid).toBe(true);
+      }
+    });
+
+    it('should validate negative_prompt length', () => {
+      const longPrompt = 'b'.repeat(10001);
+      const result = validateControlParams('sketch', { negative_prompt: longPrompt });
+      expect(result.valid).toBe(false);
+      expect(result.errors[0]).toContain('Negative prompt exceeds');
     });
   });
 });

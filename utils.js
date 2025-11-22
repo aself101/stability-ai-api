@@ -13,6 +13,19 @@ import axios from 'axios';
 import { lookup } from 'dns/promises';
 import { isIPv4, isIPv6 } from 'net';
 
+// ============================================================================
+// Constants
+// ============================================================================
+
+/** Maximum file size for image downloads (50MB) */
+export const MAX_DOWNLOAD_SIZE = 50 * 1024 * 1024;
+
+/** Timeout for downloading images from URLs (60 seconds) */
+export const DOWNLOAD_TIMEOUT_MS = 60000;
+
+/** Maximum number of redirects allowed when fetching URLs */
+export const MAX_REDIRECTS = 5;
+
 // Configure module logger
 const logger = winston.createLogger({
   level: 'info',
@@ -398,19 +411,17 @@ export async function fileToBase64(filepath) {
  */
 export async function urlToBase64(url) {
   try {
-    const MAX_SIZE = 50 * 1024 * 1024; // 50MB limit
-
     const response = await axios.get(url, {
       responseType: 'arraybuffer',
-      timeout: 60000,              // 60 second timeout for large files
-      maxRedirects: 5,             // Limit redirects
-      maxContentLength: MAX_SIZE,  // Axios built-in size limit
-      maxBodyLength: MAX_SIZE      // Axios built-in size limit
+      timeout: DOWNLOAD_TIMEOUT_MS,
+      maxRedirects: MAX_REDIRECTS,
+      maxContentLength: MAX_DOWNLOAD_SIZE,
+      maxBodyLength: MAX_DOWNLOAD_SIZE
     });
 
     // Verify actual size (belt-and-suspenders approach)
-    if (response.data.length > MAX_SIZE) {
-      throw new Error(`Image exceeds maximum size of ${MAX_SIZE / (1024 * 1024)}MB`);
+    if (response.data.length > MAX_DOWNLOAD_SIZE) {
+      throw new Error(`Image exceeds maximum size of ${MAX_DOWNLOAD_SIZE / (1024 * 1024)}MB`);
     }
 
     const base64 = Buffer.from(response.data).toString('base64');
@@ -458,19 +469,17 @@ export async function downloadImage(url, filepath) {
     const dir = path.dirname(filepath);
     await ensureDirectory(dir);
 
-    const MAX_SIZE = 50 * 1024 * 1024; // 50MB limit
-
     const response = await axios.get(url, {
       responseType: 'arraybuffer',
-      timeout: 60000,              // 60 second timeout for large files
-      maxRedirects: 5,             // Limit redirects
-      maxContentLength: MAX_SIZE,  // Axios built-in size limit
-      maxBodyLength: MAX_SIZE      // Axios built-in size limit
+      timeout: DOWNLOAD_TIMEOUT_MS,
+      maxRedirects: MAX_REDIRECTS,
+      maxContentLength: MAX_DOWNLOAD_SIZE,
+      maxBodyLength: MAX_DOWNLOAD_SIZE
     });
 
     // Verify actual size
-    if (response.data.length > MAX_SIZE) {
-      throw new Error(`Image exceeds maximum size of ${MAX_SIZE / (1024 * 1024)}MB`);
+    if (response.data.length > MAX_DOWNLOAD_SIZE) {
+      throw new Error(`Image exceeds maximum size of ${MAX_DOWNLOAD_SIZE / (1024 * 1024)}MB`);
     }
 
     await fs.writeFile(filepath, Buffer.from(response.data));
@@ -657,9 +666,9 @@ export async function urlToBuffer(url) {
 
     const response = await axios.get(url, {
       responseType: 'arraybuffer',
-      timeout: 60000, // 60 second timeout
-      maxContentLength: 50 * 1024 * 1024, // 50MB limit
-      maxRedirects: 5
+      timeout: DOWNLOAD_TIMEOUT_MS,
+      maxContentLength: MAX_DOWNLOAD_SIZE,
+      maxRedirects: MAX_REDIRECTS
     });
 
     const buffer = Buffer.from(response.data);

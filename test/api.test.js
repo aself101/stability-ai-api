@@ -124,36 +124,32 @@ describe('StabilityAPI Class', () => {
   });
 
   describe('API Method Signatures', () => {
-    it('should have generateUltra method', () => {
-      expect(typeof api.generateUltra).toBe('function');
-    });
+    it('should expose all required public methods', () => {
+      // Generation methods
+      const generationMethods = ['generateUltra', 'generateCore', 'generateSD3'];
+      // Upscale methods
+      const upscaleMethods = ['upscaleFast', 'upscaleConservative', 'upscaleCreative'];
+      // Edit methods
+      const editMethods = [
+        'erase', 'inpaint', 'outpaint', 'searchAndReplace',
+        'searchAndRecolor', 'removeBackground', 'replaceBackgroundAndRelight'
+      ];
+      // Control methods
+      const controlMethods = ['controlSketch', 'controlStructure', 'controlStyle', 'controlStyleTransfer'];
+      // Utility methods
+      const utilityMethods = ['waitForResult', 'getResult', 'getBalance'];
 
-    it('should have generateCore method', () => {
-      expect(typeof api.generateCore).toBe('function');
-    });
+      const allMethods = [
+        ...generationMethods,
+        ...upscaleMethods,
+        ...editMethods,
+        ...controlMethods,
+        ...utilityMethods
+      ];
 
-    it('should have generateSD3 method', () => {
-      expect(typeof api.generateSD3).toBe('function');
-    });
-
-    it('should have upscaleFast method', () => {
-      expect(typeof api.upscaleFast).toBe('function');
-    });
-
-    it('should have upscaleConservative method', () => {
-      expect(typeof api.upscaleConservative).toBe('function');
-    });
-
-    it('should have upscaleCreative method', () => {
-      expect(typeof api.upscaleCreative).toBe('function');
-    });
-
-    it('should have waitForResult method', () => {
-      expect(typeof api.waitForResult).toBe('function');
-    });
-
-    it('should have getResult method', () => {
-      expect(typeof api.getResult).toBe('function');
+      allMethods.forEach(method => {
+        expect(api[method], `Missing method: ${method}`).toBeInstanceOf(Function);
+      });
     });
   });
 
@@ -161,37 +157,6 @@ describe('StabilityAPI Class', () => {
     it('should require API key for requests', () => {
       const noKeyApi = new StabilityAPI(null);
       expect(() => noKeyApi._verifyApiKey()).toThrow('API key is required');
-    });
-  });
-
-  describe('Model-Specific Features', () => {
-    describe('Generate methods should accept correct parameters', () => {
-      it('generateUltra should accept aspect_ratio', () => {
-        // Method exists and accepts parameters
-        expect(api.generateUltra).toBeDefined();
-      });
-
-      it('generateCore should accept style_preset', () => {
-        expect(api.generateCore).toBeDefined();
-      });
-
-      it('generateSD3 should accept model parameter', () => {
-        expect(api.generateSD3).toBeDefined();
-      });
-    });
-
-    describe('Upscale methods should accept correct parameters', () => {
-      it('upscaleFast should accept output_format', () => {
-        expect(api.upscaleFast).toBeDefined();
-      });
-
-      it('upscaleConservative should accept prompt', () => {
-        expect(api.upscaleConservative).toBeDefined();
-      });
-
-      it('upscaleCreative should accept creativity', () => {
-        expect(api.upscaleCreative).toBeDefined();
-      });
     });
   });
 
@@ -820,5 +785,157 @@ describe('Edit API Integration Patterns', () => {
     // This method should use waitForResult by default
     expect(api.replaceBackgroundAndRelight).toBeDefined();
     expect(api.waitForResult).toBeDefined(); // Should have polling capability
+  });
+});
+
+// ==================== Control Methods Tests ====================
+
+describe('Control Methods', () => {
+  let api;
+
+  beforeEach(() => {
+    api = new StabilityAPI('test-key');
+  });
+
+  describe('Method Signatures', () => {
+    it('should have controlSketch method', () => {
+      expect(api.controlSketch).toBeDefined();
+      expect(typeof api.controlSketch).toBe('function');
+      expect(api.controlSketch.length).toBeGreaterThanOrEqual(2); // image, prompt required
+    });
+
+    it('should have controlStructure method', () => {
+      expect(api.controlStructure).toBeDefined();
+      expect(typeof api.controlStructure).toBe('function');
+      expect(api.controlStructure.length).toBeGreaterThanOrEqual(2); // image, prompt required
+    });
+
+    it('should have controlStyle method', () => {
+      expect(api.controlStyle).toBeDefined();
+      expect(typeof api.controlStyle).toBe('function');
+      expect(api.controlStyle.length).toBeGreaterThanOrEqual(2); // image, prompt required
+    });
+
+    it('should have controlStyleTransfer method', () => {
+      expect(api.controlStyleTransfer).toBeDefined();
+      expect(typeof api.controlStyleTransfer).toBe('function');
+      expect(api.controlStyleTransfer.length).toBeGreaterThanOrEqual(2); // initImage, styleImage required
+    });
+  });
+
+  describe('Mocked API Calls', () => {
+    // Mock buildFormData at module level to prevent file system access
+    let mockBuildFormData;
+
+    beforeEach(async () => {
+      // Create a mock FormData-like object
+      const mockFormData = { append: vi.fn(), getHeaders: vi.fn(() => ({})) };
+      const utilsModule = await import('../utils.js');
+      mockBuildFormData = vi.spyOn(utilsModule, 'buildFormData').mockResolvedValue(mockFormData);
+    });
+
+    it('controlSketch should call correct endpoint with prompt and control_strength', async () => {
+      const mockResult = { image: Buffer.from([0x89, 0x50, 0x4E, 0x47]), finish_reason: 'SUCCESS' };
+      const mockRequest = vi.spyOn(api, '_makeFormDataRequest').mockResolvedValue(mockResult);
+
+      const result = await api.controlSketch('/fake/sketch.png', 'medieval castle', {
+        control_strength: 0.7,
+        seed: 42,
+        output_format: 'png'
+      });
+
+      expect(mockRequest).toHaveBeenCalledTimes(1);
+      expect(mockRequest).toHaveBeenCalledWith('POST', '/v2beta/stable-image/control/sketch', expect.any(Object));
+      expect(result).toEqual(mockResult);
+    });
+
+    it('controlSketch should use default options when none provided', async () => {
+      const mockResult = { image: Buffer.from([0x89, 0x50, 0x4E, 0x47]), finish_reason: 'SUCCESS' };
+      vi.spyOn(api, '_makeFormDataRequest').mockResolvedValue(mockResult);
+
+      const result = await api.controlSketch('/fake/sketch.png', 'castle');
+
+      expect(result).toEqual(mockResult);
+    });
+
+    it('controlStructure should call correct endpoint with structure options', async () => {
+      const mockResult = { image: Buffer.from([0x89, 0x50, 0x4E, 0x47]), finish_reason: 'SUCCESS' };
+      const mockRequest = vi.spyOn(api, '_makeFormDataRequest').mockResolvedValue(mockResult);
+
+      const result = await api.controlStructure('/fake/statue.png', 'garden shrub', {
+        control_strength: 0.6,
+        style_preset: 'photographic'
+      });
+
+      expect(mockRequest).toHaveBeenCalledTimes(1);
+      expect(mockRequest).toHaveBeenCalledWith('POST', '/v2beta/stable-image/control/structure', expect.any(Object));
+      expect(result).toEqual(mockResult);
+    });
+
+    it('controlStyle should call correct endpoint with fidelity and aspect_ratio', async () => {
+      const mockResult = { image: Buffer.from([0x89, 0x50, 0x4E, 0x47]), finish_reason: 'SUCCESS' };
+      const mockRequest = vi.spyOn(api, '_makeFormDataRequest').mockResolvedValue(mockResult);
+
+      const result = await api.controlStyle('/fake/style-ref.png', 'portrait of a chicken', {
+        fidelity: 0.8,
+        aspect_ratio: '16:9',
+        seed: 123
+      });
+
+      expect(mockRequest).toHaveBeenCalledTimes(1);
+      expect(mockRequest).toHaveBeenCalledWith('POST', '/v2beta/stable-image/control/style', expect.any(Object));
+      expect(result).toEqual(mockResult);
+    });
+
+    it('controlStyleTransfer should call correct endpoint with two images', async () => {
+      const mockResult = { image: Buffer.from([0x89, 0x50, 0x4E, 0x47]), finish_reason: 'SUCCESS' };
+      const mockRequest = vi.spyOn(api, '_makeFormDataRequest').mockResolvedValue(mockResult);
+
+      const result = await api.controlStyleTransfer('/fake/photo.png', '/fake/art-style.png', {
+        style_strength: 0.8,
+        composition_fidelity: 0.95
+      });
+
+      expect(mockRequest).toHaveBeenCalledTimes(1);
+      expect(mockRequest).toHaveBeenCalledWith('POST', '/v2beta/stable-image/control/style-transfer', expect.any(Object));
+      expect(result).toEqual(mockResult);
+    });
+
+    it('controlStyleTransfer should accept optional prompt', async () => {
+      const mockResult = { image: Buffer.from([0x89, 0x50, 0x4E, 0x47]), finish_reason: 'SUCCESS' };
+      vi.spyOn(api, '_makeFormDataRequest').mockResolvedValue(mockResult);
+
+      const result = await api.controlStyleTransfer('/fake/photo.png', '/fake/art.png', {
+        prompt: 'watercolor style portrait',
+        change_strength: 0.7
+      });
+
+      expect(result).toEqual(mockResult);
+    });
+
+    it('controlStyleTransfer should work with minimal options', async () => {
+      const mockResult = { image: Buffer.from([0x89, 0x50, 0x4E, 0x47]), finish_reason: 'SUCCESS' };
+      vi.spyOn(api, '_makeFormDataRequest').mockResolvedValue(mockResult);
+
+      const result = await api.controlStyleTransfer('/fake/photo.png', '/fake/style.png');
+
+      expect(result).toEqual(mockResult);
+    });
+  });
+
+  describe('All Control Methods Are Synchronous', () => {
+    it('should have all control methods as synchronous operations', () => {
+      // All control methods should be defined (none use waitForResult by default)
+      const controlMethods = [
+        'controlSketch',
+        'controlStructure',
+        'controlStyle',
+        'controlStyleTransfer'
+      ];
+
+      controlMethods.forEach(method => {
+        expect(api[method]).toBeDefined();
+      });
+    });
   });
 });

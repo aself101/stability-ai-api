@@ -3,9 +3,9 @@
 [![npm version](https://img.shields.io/npm/v/stability-ai-api.svg)](https://www.npmjs.com/package/stability-ai-api)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node.js Version](https://img.shields.io/node/v/stability-ai-api)](https://nodejs.org)
-[![Tests](https://img.shields.io/badge/tests-248%20passing-brightgreen)](test/)
+[![Tests](https://img.shields.io/badge/tests-283%20passing-brightgreen)](test/)
 
-A Node.js wrapper for the [Stability AI API](https://platform.stability.ai/docs/api-reference) that provides easy access to Stable Diffusion 3.5 and image upscaling models. Generate stunning AI images and upscale existing ones with professional quality through a simple command-line interface.
+A Node.js wrapper for the [Stability AI API](https://platform.stability.ai/docs/api-reference) that provides easy access to Stable Diffusion 3.5, image upscaling, editing, and control models. Generate stunning AI images, upscale, edit, and control them with professional quality through a simple command-line interface.
 
 This service follows the data-collection architecture pattern with organized data storage, automatic polling for async operations, retry logic, comprehensive logging, and CLI orchestration.
 
@@ -45,6 +45,8 @@ console.log('Image saved to:', result.image_path);
 
 - [Overview](#overview)
 - [Models](#models)
+- [Edit Operations](#edit-operations)
+- [Control Operations](#control-operations)
 - [Authentication Setup](#authentication-setup)
 - [Installation](#installation)
 - [Programmatic Usage](#programmatic-usage)
@@ -59,7 +61,7 @@ console.log('Image saved to:', result.image_path);
 
 The Stability AI API provides access to state-of-the-art image generation and upscaling models. This Node.js service implements:
 
-- **13 Endpoints** - 3 Generate + 3 Upscale + 7 Edit operations
+- **17 Endpoints** - 3 Generate + 3 Upscale + 7 Edit + 4 Control operations
 - **Production Security** - API key redaction, error sanitization, HTTPS enforcement, comprehensive SSRF protection (including IPv4-mapped IPv6 bypass prevention)
 - **DoS Prevention** - Request timeouts (30s API calls), file size limits (50MB), redirect limits
 - **Parameter Validation** - Pre-flight validation catches invalid parameters before API calls
@@ -70,7 +72,7 @@ The Stability AI API provides access to state-of-the-art image generation and up
 - **Image Input Support** - Convert local files to Buffers with validation
 - **Organized Storage** - Structured directories with timestamped files and metadata
 - **CLI Orchestration** - Command-line tool with subcommands for generation and upscaling
-- **Comprehensive Testing** - 248 tests with Vitest for reliability
+- **Comprehensive Testing** - 283 tests with Vitest for reliability
 
 ## Models
 
@@ -261,6 +263,74 @@ Available presets: enhance, anime, photographic, digital-art, comic-book, fantas
 - Remove Background: 5 credits
 - Replace BG & Relight: 8 credits
 
+## Control Operations
+
+4 control operations for guided image generation with structure, style, and sketch inputs.
+
+### Control: Sketch
+Convert rough sketches into refined images with precise control over the generation process.
+
+**Best for:** Creating detailed images from simple sketches or line art
+
+**Parameters:**
+- `image` - Input sketch image (required)
+- `prompt` - What to generate from the sketch (required)
+- `control_strength` - Influence of sketch on generation (0-1, default: 0.7)
+- `negative_prompt` - What NOT to generate
+- `seed` - Random seed (0 to 4,294,967,294)
+- `output_format` - Output format (jpeg, png, webp)
+- `style_preset` - Style preset (photographic, anime, cinematic, etc.)
+
+### Control: Structure
+Generate images while preserving the structure and composition of an input image.
+
+**Best for:** Transforming images while maintaining layout and composition
+
+**Parameters:**
+- `image` - Input structure reference image (required)
+- `prompt` - What to generate (required)
+- `control_strength` - Influence of structure on generation (0-1, default: 0.7)
+- `negative_prompt` - What NOT to generate
+- `seed` - Random seed (0 to 4,294,967,294)
+- `output_format` - Output format (jpeg, png, webp)
+- `style_preset` - Style preset
+
+### Control: Style
+Generate content guided by the style of a reference image.
+
+**Best for:** Creating images that match the artistic style of a reference
+
+**Parameters:**
+- `image` - Style reference image (required)
+- `prompt` - What to generate with that style (required)
+- `fidelity` - How closely output resembles input style (0-1, default: 0.5)
+- `negative_prompt` - What NOT to generate
+- `seed` - Random seed (0 to 4,294,967,294)
+- `output_format` - Output format (jpeg, png, webp)
+- `aspect_ratio` - Image proportions (1:1, 16:9, 21:9, 2:3, 3:2, 4:5, 5:4, 9:16, 9:21)
+
+### Control: Style Transfer
+Transfer the artistic style from one image to another image.
+
+**Best for:** Applying artistic styles to existing photos or images
+
+**Parameters:**
+- `init_image` - Image to apply style to (required)
+- `style_image` - Style reference image (required)
+- `prompt` - Optional guidance for the transfer
+- `negative_prompt` - What NOT to generate
+- `style_strength` - Intensity of style transfer (0-1)
+- `composition_fidelity` - How much to preserve original composition (0-1)
+- `change_strength` - How much to modify the original (0.1-1)
+- `seed` - Random seed (0 to 4,294,967,294)
+- `output_format` - Output format (jpeg, png, webp)
+
+### Control Credits
+- Sketch: 5 credits
+- Structure: 5 credits
+- Style: 5 credits
+- Style Transfer: 8 credits
+
 ## Authentication Setup
 
 ### 1. Get Your API Key
@@ -318,7 +388,7 @@ cd stability-ai-api
 npm install
 
 # Run tests
-npm test  # Run 248 tests
+npm test  # Run 283 tests
 ```
 
 ## Programmatic Usage
@@ -439,6 +509,51 @@ const result = await api.upscaleCreative('./sketch.jpg', {
 // Asynchronous - automatically polls for result
 // The method waits until upscaling completes
 console.log('Creative upscale finished:', result.finish_reason);
+```
+
+### Control Methods
+
+#### Control: Sketch
+
+```javascript
+const result = await api.controlSketch('./sketch.png', 'castle on a hill', {
+  control_strength: 0.7,
+  negative_prompt: 'blurry, low quality',
+  seed: 42,
+  output_format: 'png'
+});
+```
+
+#### Control: Structure
+
+```javascript
+const result = await api.controlStructure('./statue.jpg', 'garden shrub sculpture', {
+  control_strength: 0.8,
+  style_preset: 'photographic',
+  output_format: 'png'
+});
+```
+
+#### Control: Style
+
+```javascript
+const result = await api.controlStyle('./art-reference.png', 'portrait of a chicken', {
+  fidelity: 0.5,
+  aspect_ratio: '1:1',
+  output_format: 'png'
+});
+```
+
+#### Control: Style Transfer
+
+```javascript
+const result = await api.controlStyleTransfer('./photo.png', './artwork.jpg', {
+  prompt: 'enhance the artistic style',
+  style_strength: 0.7,
+  composition_fidelity: 0.5,
+  change_strength: 0.3,
+  output_format: 'png'
+});
 ```
 
 ### Utility Methods
@@ -719,6 +834,45 @@ sai edit replace-bg \
 sai edit examples
 ```
 
+### Control Commands
+
+**Sketch to Image:**
+```bash
+sai control sketch \
+  --image ./sketch.png \
+  --prompt "castle on a hill, fantasy style" \
+  --control-strength 0.7
+```
+
+**Structure Preservation:**
+```bash
+sai control structure \
+  --image ./statue.jpg \
+  --prompt "garden shrub sculpture" \
+  --control-strength 0.8
+```
+
+**Style Reference:**
+```bash
+sai control style \
+  --image ./art-reference.png \
+  --prompt "portrait of a chicken" \
+  --fidelity 0.5
+```
+
+**Style Transfer:**
+```bash
+sai control style-transfer \
+  --init-image ./photo.png \
+  --style-image ./artwork.jpg \
+  --style-strength 0.7
+```
+
+**Show Control Examples:**
+```bash
+sai control examples
+```
+
 ## Examples
 
 ### Basic Image Generation
@@ -859,7 +1013,7 @@ datasets/
 The service includes comprehensive testing:
 
 ```bash
-# Run all tests (248 tests)
+# Run all tests (283 tests)
 npm test
 
 # Watch mode for development
@@ -959,5 +1113,5 @@ MIT
 
 Contributions welcome! Please ensure all tests pass before submitting PRs:
 ```bash
-npm test  # All 248 tests must pass
+npm test  # All 283 tests must pass
 ```

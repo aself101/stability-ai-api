@@ -143,6 +143,56 @@ export const EDIT_CONSTRAINTS = {
   }
 };
 
+// Control endpoints (all synchronous)
+export const CONTROL_ENDPOINTS = {
+  'sketch': '/v2beta/stable-image/control/sketch',
+  'structure': '/v2beta/stable-image/control/structure',
+  'style': '/v2beta/stable-image/control/style',
+  'style-transfer': '/v2beta/stable-image/control/style-transfer'
+};
+
+// Control operation constraints
+export const CONTROL_CONSTRAINTS = {
+  'sketch': {
+    promptMaxLength: 10000,
+    control_strength: { min: 0, max: 1, default: 0.7 },
+    seed: { min: 0, max: 4294967294 },
+    outputFormats: OUTPUT_FORMATS,
+    stylePresets: STYLE_PRESETS,
+    pixels: { min: 4096, max: 9437184 },
+    requiresAspectRatio: true // 1:2.5 to 2.5:1
+  },
+  'structure': {
+    promptMaxLength: 10000,
+    control_strength: { min: 0, max: 1, default: 0.7 },
+    seed: { min: 0, max: 4294967294 },
+    outputFormats: OUTPUT_FORMATS,
+    stylePresets: STYLE_PRESETS,
+    pixels: { min: 4096, max: 9437184 },
+    requiresAspectRatio: true // 1:2.5 to 2.5:1
+  },
+  'style': {
+    promptMaxLength: 10000,
+    fidelity: { min: 0, max: 1, default: 0.5 },
+    aspectRatios: ASPECT_RATIOS,
+    seed: { min: 0, max: 4294967294 },
+    outputFormats: OUTPUT_FORMATS,
+    stylePresets: STYLE_PRESETS,
+    pixels: { min: 4096, max: 9437184 },
+    requiresAspectRatio: true // 1:2.5 to 2.5:1
+  },
+  'style-transfer': {
+    promptMaxLength: 10000,
+    style_strength: { min: 0, max: 1, default: 1 },
+    composition_fidelity: { min: 0, max: 1, default: 0.9 },
+    change_strength: { min: 0.1, max: 1, default: 0.9 },
+    seed: { min: 0, max: 4294967294 },
+    outputFormats: OUTPUT_FORMATS,
+    pixels: { min: 4096, max: 9437184 },
+    requiresAspectRatio: true // 1:2.5 to 2.5:1
+  }
+};
+
 // Model parameter constraints
 export const MODEL_CONSTRAINTS = {
   'stable-image-ultra': {
@@ -266,6 +316,55 @@ export function getPollInterval() {
 export function getTimeout() {
   const timeout = parseInt(process.env.STABILITY_TIMEOUT);
   return isNaN(timeout) ? DEFAULT_TIMEOUT : timeout;
+}
+
+// ============================================================================
+// Validation Helper Functions (Internal)
+// These reduce duplication across validateModelParams, validateEditParams,
+// and validateControlParams functions.
+// ============================================================================
+
+/**
+ * Validate string length against maximum.
+ * @param {string} value - String to validate
+ * @param {number} maxLength - Maximum allowed length
+ * @param {string} fieldName - Name of field for error message
+ * @param {string} context - Context (model/operation name)
+ * @param {string[]} errors - Array to push errors to
+ */
+function validateStringLength(value, maxLength, fieldName, context, errors) {
+  if (value && maxLength && value.length > maxLength) {
+    errors.push(`${fieldName} exceeds maximum length of ${maxLength} characters for ${context}`);
+  }
+}
+
+/**
+ * Validate value is in allowed set.
+ * @param {*} value - Value to validate
+ * @param {Array} allowedValues - Array of allowed values
+ * @param {string} fieldName - Name of field for error message
+ * @param {string} context - Context (model/operation name)
+ * @param {string[]} errors - Array to push errors to
+ */
+function validateEnumValue(value, allowedValues, fieldName, context, errors) {
+  if (value && allowedValues && !allowedValues.includes(value)) {
+    errors.push(`Invalid ${fieldName} "${value}" for ${context}. Valid values: ${allowedValues.join(', ')}`);
+  }
+}
+
+/**
+ * Validate numeric value is within range.
+ * @param {number} value - Value to validate
+ * @param {number} min - Minimum allowed value
+ * @param {number} max - Maximum allowed value
+ * @param {string} fieldName - Name of field for error message
+ * @param {string} context - Context (model/operation name)
+ * @param {string[]} errors - Array to push errors to
+ */
+function validateNumericRange(value, min, max, fieldName, context, errors) {
+  if (value !== undefined && (value < min || value > max)) {
+    errors.push(`${fieldName} must be between ${min} and ${max} for ${context}`);
+  }
 }
 
 /**
@@ -581,6 +680,138 @@ export function validateEditParams(operation, params) {
   if (operation === 'replace-background-and-relight') {
     if (!params.background_prompt && !params.background_reference) {
       errors.push('Either background_prompt or background_reference is required for replace-background-and-relight');
+    }
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors
+  };
+}
+
+/**
+ * Get control constraints for a specific operation.
+ *
+ * @param {string} operation - Control operation name
+ * @returns {Object|null} Control constraints or null if operation not found
+ */
+export function getControlConstraints(operation) {
+  return CONTROL_CONSTRAINTS[operation] || null;
+}
+
+/**
+ * Validate control operation parameters against constraints.
+ * Pre-flight validation to catch errors before making API calls and wasting credits.
+ *
+ * @param {string} operation - Control operation (sketch, structure, style, style-transfer)
+ * @param {Object} params - Parameters to validate
+ * @returns {Object} Validation result { valid: boolean, errors: string[] }
+ *
+ * @example
+ * const validation = validateControlParams('sketch', { prompt: 'castle', control_strength: 0.7 });
+ * if (!validation.valid) {
+ *   console.error('Validation errors:', validation.errors);
+ * }
+ */
+export function validateControlParams(operation, params) {
+  const errors = [];
+  const constraints = CONTROL_CONSTRAINTS[operation];
+
+  if (!constraints) {
+    errors.push(`Unknown control operation: ${operation}`);
+    return { valid: false, errors };
+  }
+
+  // Validate prompt length
+  if (params.prompt && constraints.promptMaxLength) {
+    if (params.prompt.length > constraints.promptMaxLength) {
+      errors.push(
+        `Prompt exceeds maximum length of ${constraints.promptMaxLength} characters for ${operation}`
+      );
+    }
+  }
+
+  // Validate negative_prompt length
+  if (params.negative_prompt && constraints.promptMaxLength) {
+    if (params.negative_prompt.length > constraints.promptMaxLength) {
+      errors.push(
+        `Negative prompt exceeds maximum length of ${constraints.promptMaxLength} characters for ${operation}`
+      );
+    }
+  }
+
+  // Validate output_format
+  if (params.output_format && constraints.outputFormats) {
+    if (!constraints.outputFormats.includes(params.output_format)) {
+      errors.push(
+        `Invalid output_format "${params.output_format}" for ${operation}. Valid formats: ${constraints.outputFormats.join(', ')}`
+      );
+    }
+  }
+
+  // Validate seed
+  if (params.seed !== undefined && constraints.seed) {
+    const { min, max } = constraints.seed;
+    if (params.seed < min || params.seed > max) {
+      errors.push(`Seed must be between ${min} and ${max} for ${operation}`);
+    }
+  }
+
+  // Validate control_strength (for sketch and structure)
+  if (params.control_strength !== undefined && constraints.control_strength) {
+    const { min, max } = constraints.control_strength;
+    if (params.control_strength < min || params.control_strength > max) {
+      errors.push(`control_strength must be between ${min} and ${max} for ${operation}`);
+    }
+  }
+
+  // Validate fidelity (for style)
+  if (params.fidelity !== undefined && constraints.fidelity) {
+    const { min, max } = constraints.fidelity;
+    if (params.fidelity < min || params.fidelity > max) {
+      errors.push(`fidelity must be between ${min} and ${max} for ${operation}`);
+    }
+  }
+
+  // Validate aspect_ratio (for style)
+  if (params.aspect_ratio && constraints.aspectRatios) {
+    if (!constraints.aspectRatios.includes(params.aspect_ratio)) {
+      errors.push(
+        `Invalid aspect_ratio "${params.aspect_ratio}" for ${operation}. Valid ratios: ${constraints.aspectRatios.join(', ')}`
+      );
+    }
+  }
+
+  // Validate style_strength (for style-transfer)
+  if (params.style_strength !== undefined && constraints.style_strength) {
+    const { min, max } = constraints.style_strength;
+    if (params.style_strength < min || params.style_strength > max) {
+      errors.push(`style_strength must be between ${min} and ${max} for ${operation}`);
+    }
+  }
+
+  // Validate composition_fidelity (for style-transfer)
+  if (params.composition_fidelity !== undefined && constraints.composition_fidelity) {
+    const { min, max } = constraints.composition_fidelity;
+    if (params.composition_fidelity < min || params.composition_fidelity > max) {
+      errors.push(`composition_fidelity must be between ${min} and ${max} for ${operation}`);
+    }
+  }
+
+  // Validate change_strength (for style-transfer)
+  if (params.change_strength !== undefined && constraints.change_strength) {
+    const { min, max } = constraints.change_strength;
+    if (params.change_strength < min || params.change_strength > max) {
+      errors.push(`change_strength must be between ${min} and ${max} for ${operation}`);
+    }
+  }
+
+  // Validate style_preset
+  if (params.style_preset && constraints.stylePresets) {
+    if (!constraints.stylePresets.includes(params.style_preset)) {
+      errors.push(
+        `Invalid style_preset "${params.style_preset}" for ${operation}. Valid presets: ${constraints.stylePresets.join(', ')}`
+      );
     }
   }
 

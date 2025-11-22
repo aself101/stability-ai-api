@@ -18,7 +18,7 @@
 
 import axios from 'axios';
 import { logger, buildFormData, createSpinner } from './utils.js';
-import { BASE_URL, MODEL_ENDPOINTS, EDIT_ENDPOINTS, DEFAULT_POLL_INTERVAL, DEFAULT_TIMEOUT } from './config.js';
+import { BASE_URL, MODEL_ENDPOINTS, EDIT_ENDPOINTS, CONTROL_ENDPOINTS, DEFAULT_POLL_INTERVAL, DEFAULT_TIMEOUT } from './config.js';
 
 /**
  * Stability AI API Client
@@ -843,6 +843,164 @@ export class StabilityAPI {
     }
 
     return task;
+  }
+
+  // ==================== Control Methods ====================
+
+  /**
+   * Control: Sketch - Convert sketches to refined images.
+   * Upgrades rough hand-drawn sketches to refined outputs with precise control.
+   * For non-sketch images, it leverages contour lines and edges within the image.
+   *
+   * @param {string} image - Path to input sketch image or URL
+   * @param {string} prompt - What to generate from the sketch (1-10000 chars)
+   * @param {Object} [options={}] - Control options
+   * @param {number} [options.control_strength=0.7] - How much influence the image has (0-1)
+   * @param {string} [options.negative_prompt] - What NOT to generate
+   * @param {number} [options.seed] - Random seed (0-4294967294)
+   * @param {string} [options.output_format='png'] - Output format (jpeg, png, webp)
+   * @param {string} [options.style_preset] - Style preset (e.g., 'photographic', 'anime')
+   * @returns {Promise<Object>} Generated image result with image buffer
+   *
+   * @example
+   * const result = await api.controlSketch('/path/to/sketch.png', 'a medieval castle on a hill');
+   * const result = await api.controlSketch('/path/to/sketch.png', 'castle', { control_strength: 0.8 });
+   */
+  async controlSketch(image, prompt, options = {}) {
+    logger.info('Generating from sketch with Control: Sketch');
+
+    const formData = await buildFormData(
+      {
+        prompt,
+        control_strength: options.control_strength,
+        negative_prompt: options.negative_prompt,
+        seed: options.seed,
+        output_format: options.output_format || 'png',
+        style_preset: options.style_preset
+      },
+      { image }
+    );
+
+    return await this._makeFormDataRequest('POST', CONTROL_ENDPOINTS['sketch'], formData);
+  }
+
+  /**
+   * Control: Structure - Generate images while preserving input structure.
+   * Maintains the structural elements of an input image while generating new content.
+   * Ideal for recreating scenes or rendering characters from models.
+   *
+   * @param {string} image - Path to input image or URL (structure reference)
+   * @param {string} prompt - What to generate with the structure (1-10000 chars)
+   * @param {Object} [options={}] - Control options
+   * @param {number} [options.control_strength=0.7] - How much influence the image has (0-1)
+   * @param {string} [options.negative_prompt] - What NOT to generate
+   * @param {number} [options.seed] - Random seed (0-4294967294)
+   * @param {string} [options.output_format='png'] - Output format (jpeg, png, webp)
+   * @param {string} [options.style_preset] - Style preset (e.g., 'photographic', 'anime')
+   * @returns {Promise<Object>} Generated image result with image buffer
+   *
+   * @example
+   * const result = await api.controlStructure('/path/to/statue.png', 'a shrub in an english garden');
+   * const result = await api.controlStructure('/path/to/photo.jpg', 'oil painting style', { control_strength: 0.6 });
+   */
+  async controlStructure(image, prompt, options = {}) {
+    logger.info('Generating with structure preservation with Control: Structure');
+
+    const formData = await buildFormData(
+      {
+        prompt,
+        control_strength: options.control_strength,
+        negative_prompt: options.negative_prompt,
+        seed: options.seed,
+        output_format: options.output_format || 'png',
+        style_preset: options.style_preset
+      },
+      { image }
+    );
+
+    return await this._makeFormDataRequest('POST', CONTROL_ENDPOINTS['structure'], formData);
+  }
+
+  /**
+   * Control: Style - Generate images guided by a style reference.
+   * Extracts stylistic elements from an input image and uses them to guide generation.
+   * Creates a new image in the same style as the control image.
+   *
+   * @param {string} image - Path to style reference image or URL
+   * @param {string} prompt - What to generate with the style (1-10000 chars)
+   * @param {Object} [options={}] - Control options
+   * @param {number} [options.fidelity=0.5] - How closely output resembles input style (0-1)
+   * @param {string} [options.aspect_ratio='1:1'] - Output aspect ratio
+   * @param {string} [options.negative_prompt] - What NOT to generate
+   * @param {number} [options.seed] - Random seed (0-4294967294)
+   * @param {string} [options.output_format='png'] - Output format (jpeg, png, webp)
+   * @param {string} [options.style_preset] - Style preset (e.g., 'photographic', 'anime')
+   * @returns {Promise<Object>} Generated image result with image buffer
+   *
+   * @example
+   * const result = await api.controlStyle('/path/to/style-ref.png', 'a majestic portrait of a chicken');
+   * const result = await api.controlStyle('/path/to/art.jpg', 'landscape', { fidelity: 0.8, aspect_ratio: '16:9' });
+   */
+  async controlStyle(image, prompt, options = {}) {
+    logger.info('Generating with style guidance with Control: Style');
+
+    const formData = await buildFormData(
+      {
+        prompt,
+        fidelity: options.fidelity,
+        aspect_ratio: options.aspect_ratio,
+        negative_prompt: options.negative_prompt,
+        seed: options.seed,
+        output_format: options.output_format || 'png',
+        style_preset: options.style_preset
+      },
+      { image }
+    );
+
+    return await this._makeFormDataRequest('POST', CONTROL_ENDPOINTS['style'], formData);
+  }
+
+  /**
+   * Control: Style Transfer - Apply style from one image to another.
+   * Transfers visual characteristics from a style image to a content image
+   * while preserving the original composition.
+   *
+   * @param {string} initImage - Path to content image or URL (what to restyle)
+   * @param {string} styleImage - Path to style reference image or URL
+   * @param {Object} [options={}] - Style transfer options
+   * @param {string} [options.prompt] - Optional prompt to guide transfer (0-10000 chars)
+   * @param {string} [options.negative_prompt] - What NOT to generate
+   * @param {number} [options.style_strength=1] - Influence of style image (0-1, 0=identical to input)
+   * @param {number} [options.composition_fidelity=0.9] - How closely to preserve composition (0-1)
+   * @param {number} [options.change_strength=0.9] - How much the original should change (0.1-1)
+   * @param {number} [options.seed] - Random seed (0-4294967294)
+   * @param {string} [options.output_format='png'] - Output format (jpeg, png, webp)
+   * @returns {Promise<Object>} Style transferred image result with image buffer
+   *
+   * @example
+   * const result = await api.controlStyleTransfer('/path/to/photo.png', '/path/to/art-style.png');
+   * const result = await api.controlStyleTransfer('/path/to/portrait.png', '/path/to/oil-painting.jpg', {
+   *   style_strength: 0.8,
+   *   composition_fidelity: 0.95
+   * });
+   */
+  async controlStyleTransfer(initImage, styleImage, options = {}) {
+    logger.info('Transferring style between images with Control: Style Transfer');
+
+    const formData = await buildFormData(
+      {
+        prompt: options.prompt,
+        negative_prompt: options.negative_prompt,
+        style_strength: options.style_strength,
+        composition_fidelity: options.composition_fidelity,
+        change_strength: options.change_strength,
+        seed: options.seed,
+        output_format: options.output_format || 'png'
+      },
+      { init_image: initImage, style_image: styleImage }
+    );
+
+    return await this._makeFormDataRequest('POST', CONTROL_ENDPOINTS['style-transfer'], formData);
   }
 }
 
