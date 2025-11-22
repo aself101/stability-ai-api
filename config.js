@@ -62,12 +62,86 @@ export const ASPECT_RATIOS = ['21:9', '16:9', '3:2', '5:4', '1:1', '4:5', '2:3',
 // Valid output formats
 export const OUTPUT_FORMATS = ['jpeg', 'png', 'webp'];
 
-// Valid style presets (subset - more available in API)
+// Valid style presets (all 17 available in API)
 export const STYLE_PRESETS = [
   'enhance', 'anime', 'photographic', 'digital-art', 'comic-book',
   'fantasy-art', 'line-art', 'analog-film', 'neon-punk', 'isometric',
-  'low-poly', 'origami', 'modeling-compound', 'cinematic', '3d-model'
+  'low-poly', 'origami', 'modeling-compound', 'cinematic', '3d-model',
+  'pixel-art', 'tile-texture'
 ];
+
+// Edit endpoints (6 synchronous, 1 asynchronous)
+export const EDIT_ENDPOINTS = {
+  'erase': '/v2beta/stable-image/edit/erase',
+  'inpaint': '/v2beta/stable-image/edit/inpaint',
+  'outpaint': '/v2beta/stable-image/edit/outpaint',
+  'search-and-replace': '/v2beta/stable-image/edit/search-and-replace',
+  'search-and-recolor': '/v2beta/stable-image/edit/search-and-recolor',
+  'remove-background': '/v2beta/stable-image/edit/remove-background',
+  'replace-background-and-relight': '/v2beta/stable-image/edit/replace-background-and-relight' // async!
+};
+
+// Edit operation constraints
+export const EDIT_CONSTRAINTS = {
+  'erase': {
+    grow_mask: { min: 0, max: 20, default: 5 },
+    seed: { min: 0, max: 4294967294 },
+    outputFormats: OUTPUT_FORMATS,
+    pixels: { min: 4096, max: 9437184 }
+  },
+  'inpaint': {
+    promptMaxLength: 10000,
+    grow_mask: { min: 0, max: 100, default: 5 },
+    seed: { min: 0, max: 4294967294 },
+    outputFormats: OUTPUT_FORMATS,
+    stylePresets: STYLE_PRESETS,
+    pixels: { min: 4096, max: 9437184 }
+  },
+  'outpaint': {
+    promptMaxLength: 10000,
+    direction: { min: 0, max: 2000 }, // left, right, up, down
+    creativity: { min: 0, max: 1, default: 0.5 },
+    seed: { min: 0, max: 4294967294 },
+    outputFormats: OUTPUT_FORMATS,
+    stylePresets: STYLE_PRESETS,
+    pixels: { min: 4096, max: 9437184 },
+    requiresAspectRatio: true // 1:2.5 to 2.5:1
+  },
+  'search-and-replace': {
+    promptMaxLength: 10000,
+    grow_mask: { min: 0, max: 20, default: 3 },
+    seed: { min: 0, max: 4294967294 },
+    outputFormats: OUTPUT_FORMATS,
+    stylePresets: STYLE_PRESETS,
+    pixels: { min: 4096, max: 9437184 },
+    requiresAspectRatio: true
+  },
+  'search-and-recolor': {
+    promptMaxLength: 10000,
+    grow_mask: { min: 0, max: 20, default: 3 },
+    seed: { min: 0, max: 4294967294 },
+    outputFormats: OUTPUT_FORMATS,
+    stylePresets: STYLE_PRESETS,
+    pixels: { min: 4096, max: 9437184 },
+    requiresAspectRatio: true
+  },
+  'remove-background': {
+    outputFormats: ['png', 'webp'], // NO jpeg - transparency required
+    pixels: { min: 4096, max: 4194304 } // stricter limit than other edit endpoints
+  },
+  'replace-background-and-relight': {
+    promptMaxLength: 10000,
+    preserve_original_subject: { min: 0, max: 1, default: 0.6 },
+    original_background_depth: { min: 0, max: 1, default: 0.5 },
+    light_source_strength: { min: 0, max: 1, default: 0.3 },
+    light_source_directions: ['left', 'right', 'above', 'below'],
+    seed: { min: 0, max: 4294967294 },
+    outputFormats: OUTPUT_FORMATS,
+    pixels: { min: 4096, max: 9437184 },
+    requiresAspectRatio: true,
+    async: true // returns task ID, requires polling
+  }
+};
 
 // Model parameter constraints
 export const MODEL_CONSTRAINTS = {
@@ -309,4 +383,209 @@ export function validateModelParams(model, params) {
  */
 export function getModelConstraints(model) {
   return MODEL_CONSTRAINTS[model] || null;
+}
+
+/**
+ * Get edit constraints for a specific operation.
+ *
+ * @param {string} operation - Edit operation name
+ * @returns {Object|null} Edit constraints or null if operation not found
+ */
+export function getEditConstraints(operation) {
+  return EDIT_CONSTRAINTS[operation] || null;
+}
+
+/**
+ * Validate edit operation parameters against constraints.
+ * Pre-flight validation to catch errors before making API calls and wasting credits.
+ *
+ * @param {string} operation - Edit operation (erase, inpaint, outpaint, etc.)
+ * @param {Object} params - Parameters to validate
+ * @returns {Object} Validation result { valid: boolean, errors: string[] }
+ *
+ * @example
+ * const validation = validateEditParams('inpaint', { prompt: 'blue sky', grow_mask: 10 });
+ * if (!validation.valid) {
+ *   console.error('Validation errors:', validation.errors);
+ * }
+ */
+export function validateEditParams(operation, params) {
+  const errors = [];
+  const constraints = EDIT_CONSTRAINTS[operation];
+
+  if (!constraints) {
+    errors.push(`Unknown edit operation: ${operation}`);
+    return { valid: false, errors };
+  }
+
+  // Validate prompt length
+  if (params.prompt && constraints.promptMaxLength) {
+    if (params.prompt.length > constraints.promptMaxLength) {
+      errors.push(
+        `Prompt exceeds maximum length of ${constraints.promptMaxLength} characters for ${operation}`
+      );
+    }
+  }
+
+  // Validate negative_prompt length
+  if (params.negative_prompt && constraints.promptMaxLength) {
+    if (params.negative_prompt.length > constraints.promptMaxLength) {
+      errors.push(
+        `Negative prompt exceeds maximum length of ${constraints.promptMaxLength} characters for ${operation}`
+      );
+    }
+  }
+
+  // Validate search_prompt length (for search-and-replace)
+  if (params.search_prompt && constraints.promptMaxLength) {
+    if (params.search_prompt.length > constraints.promptMaxLength) {
+      errors.push(
+        `Search prompt exceeds maximum length of ${constraints.promptMaxLength} characters for ${operation}`
+      );
+    }
+  }
+
+  // Validate select_prompt length (for search-and-recolor)
+  if (params.select_prompt && constraints.promptMaxLength) {
+    if (params.select_prompt.length > constraints.promptMaxLength) {
+      errors.push(
+        `Select prompt exceeds maximum length of ${constraints.promptMaxLength} characters for ${operation}`
+      );
+    }
+  }
+
+  // Validate background_prompt length (for replace-background-and-relight)
+  if (params.background_prompt && constraints.promptMaxLength) {
+    if (params.background_prompt.length > constraints.promptMaxLength) {
+      errors.push(
+        `Background prompt exceeds maximum length of ${constraints.promptMaxLength} characters for ${operation}`
+      );
+    }
+  }
+
+  // Validate foreground_prompt length (for replace-background-and-relight)
+  if (params.foreground_prompt && constraints.promptMaxLength) {
+    if (params.foreground_prompt.length > constraints.promptMaxLength) {
+      errors.push(
+        `Foreground prompt exceeds maximum length of ${constraints.promptMaxLength} characters for ${operation}`
+      );
+    }
+  }
+
+  // Validate output_format
+  if (params.output_format && constraints.outputFormats) {
+    if (!constraints.outputFormats.includes(params.output_format)) {
+      errors.push(
+        `Invalid output_format "${params.output_format}" for ${operation}. Valid formats: ${constraints.outputFormats.join(', ')}`
+      );
+    }
+  }
+
+  // Validate seed
+  if (params.seed !== undefined && constraints.seed) {
+    const { min, max } = constraints.seed;
+    if (params.seed < min || params.seed > max) {
+      errors.push(`Seed must be between ${min} and ${max} for ${operation}`);
+    }
+  }
+
+  // Validate grow_mask
+  if (params.grow_mask !== undefined && constraints.grow_mask) {
+    const { min, max } = constraints.grow_mask;
+    if (params.grow_mask < min || params.grow_mask > max) {
+      errors.push(`grow_mask must be between ${min} and ${max} for ${operation}`);
+    }
+  }
+
+  // Validate creativity (for outpaint)
+  if (params.creativity !== undefined && constraints.creativity) {
+    const { min, max } = constraints.creativity;
+    if (params.creativity < min || params.creativity > max) {
+      errors.push(`Creativity must be between ${min} and ${max} for ${operation}`);
+    }
+  }
+
+  // Validate direction values (for outpaint)
+  if (constraints.direction) {
+    const { min, max } = constraints.direction;
+    const directions = ['left', 'right', 'up', 'down'];
+    for (const dir of directions) {
+      if (params[dir] !== undefined) {
+        if (params[dir] < min || params[dir] > max) {
+          errors.push(`${dir} must be between ${min} and ${max} for ${operation}`);
+        }
+      }
+    }
+  }
+
+  // Validate at least one direction for outpaint
+  if (operation === 'outpaint') {
+    const hasDirection = ['left', 'right', 'up', 'down'].some(
+      dir => params[dir] !== undefined && params[dir] > 0
+    );
+    if (!hasDirection) {
+      errors.push('At least one direction (left, right, up, down) must be greater than 0 for outpaint');
+    }
+  }
+
+  // Validate style_preset
+  if (params.style_preset && constraints.stylePresets) {
+    if (!constraints.stylePresets.includes(params.style_preset)) {
+      errors.push(
+        `Invalid style_preset "${params.style_preset}" for ${operation}. Valid presets: ${constraints.stylePresets.join(', ')}`
+      );
+    }
+  }
+
+  // Validate preserve_original_subject (for replace-background-and-relight)
+  if (params.preserve_original_subject !== undefined && constraints.preserve_original_subject) {
+    const { min, max } = constraints.preserve_original_subject;
+    if (params.preserve_original_subject < min || params.preserve_original_subject > max) {
+      errors.push(`preserve_original_subject must be between ${min} and ${max} for ${operation}`);
+    }
+  }
+
+  // Validate original_background_depth (for replace-background-and-relight)
+  if (params.original_background_depth !== undefined && constraints.original_background_depth) {
+    const { min, max } = constraints.original_background_depth;
+    if (params.original_background_depth < min || params.original_background_depth > max) {
+      errors.push(`original_background_depth must be between ${min} and ${max} for ${operation}`);
+    }
+  }
+
+  // Validate light_source_strength (for replace-background-and-relight)
+  if (params.light_source_strength !== undefined && constraints.light_source_strength) {
+    const { min, max } = constraints.light_source_strength;
+    if (params.light_source_strength < min || params.light_source_strength > max) {
+      errors.push(`light_source_strength must be between ${min} and ${max} for ${operation}`);
+    }
+  }
+
+  // Validate light_source_direction (for replace-background-and-relight)
+  if (params.light_source_direction && constraints.light_source_directions) {
+    if (!constraints.light_source_directions.includes(params.light_source_direction)) {
+      errors.push(
+        `Invalid light_source_direction "${params.light_source_direction}" for ${operation}. Valid directions: ${constraints.light_source_directions.join(', ')}`
+      );
+    }
+  }
+
+  // Validate light_source_strength requires light_reference or light_source_direction
+  if (params.light_source_strength !== undefined && operation === 'replace-background-and-relight') {
+    if (!params.light_reference && !params.light_source_direction) {
+      errors.push('light_source_strength requires either light_reference or light_source_direction');
+    }
+  }
+
+  // Validate replace-background-and-relight requires background_prompt or background_reference
+  if (operation === 'replace-background-and-relight') {
+    if (!params.background_prompt && !params.background_reference) {
+      errors.push('Either background_prompt or background_reference is required for replace-background-and-relight');
+    }
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors
+  };
 }
