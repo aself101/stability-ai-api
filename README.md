@@ -97,7 +97,12 @@ The Stability AI API provides access to state-of-the-art image generation and up
 | Search & Replace | `sai edit search-replace` | `searchAndReplace(image, prompt, search, options)` | Sync | Replace objects by description |
 | Search & Recolor | `sai edit search-recolor` | `searchAndRecolor(image, prompt, select, options)` | Sync | Recolor selected objects |
 | Remove Background | `sai edit remove-bg` | `removeBackground(image, options)` | Sync | Extract subject from background |
-| Replace Background | `sai edit replace-bg` | `replaceBackgroundAndRelight(image, options)` | Sync | New background with relighting |
+| Replace Background | `sai edit replace-bg` | `replaceBackgroundAndRelight(image, options)` | Async | New background with relighting (polling) |
+| **Control** |
+| Control: Sketch | `sai control sketch` | `controlSketch(image, prompt, options)` | Sync | Convert sketches to refined images |
+| Control: Structure | `sai control structure` | `controlStructure(image, prompt, options)` | Sync | Preserve structure while transforming |
+| Control: Style | `sai control style` | `controlStyle(image, prompt, options)` | Sync | Match reference image style |
+| Control: Style Transfer | `sai control style-transfer` | `controlStyleTransfer(initImage, styleImage, options)` | Sync | Transfer style between images |
 
 **Note:** All API methods use `snake_case` parameters to match the Stability AI HTTP API (e.g., `aspect_ratio`, `output_format`, `style_preset`).
 
@@ -789,17 +794,31 @@ try {
 
 ### TypeScript Support
 
-The package includes TypeScript-style JSDoc comments for IntelliSense:
+This package is written in TypeScript and includes full type definitions. All types are exported for TypeScript consumers:
 
-```javascript
-/**
- * @param {Object} params
- * @param {string} params.prompt - Text description
- * @param {string} [params.aspect_ratio='1:1'] - Image aspect ratio
- * @param {number} [params.seed] - Random seed (0-4294967294)
- * @param {string} [params.output_format='png'] - Output format
- * @returns {Promise<{image: Buffer, seed: string, finish_reason: string}>}
- */
+```typescript
+import { StabilityAPI } from 'stability-ai-api';
+import type {
+  UltraParams,
+  CoreParams,
+  SD3Params,
+  UpscaleCreativeParams,
+  EditEraseParams,
+  ControlSketchParams,
+  ImageResult,
+  TaskResult
+} from 'stability-ai-api';
+
+const api = new StabilityAPI({ apiKey: 'your-key' });
+
+// Full type safety and autocomplete
+const params: UltraParams = {
+  prompt: 'A majestic mountain landscape',
+  aspect_ratio: '16:9',
+  output_format: 'png'
+};
+
+const result: ImageResult = await api.generateUltra(params);
 ```
 
 ## CLI Usage

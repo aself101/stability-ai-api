@@ -2,47 +2,61 @@
   "name": "stability-ai-api",
   "version": "0.3.1",
   "description": "Stability AI API wrapper - Stable Diffusion image generation for Node.js with CLI",
-  "main": "api.js",
+  "main": "dist/api.js",
+  "types": "dist/api.d.ts",
   "type": "module",
   "bin": {
-    "sai": "cli.js"
+    "sai": "dist/cli.js"
   },
   "exports": {
-    ".": "./api.js",
-    "./api": "./api.js",
-    "./utils": "./utils.js",
-    "./config": "./config.js"
+    ".": {
+      "import": "./dist/api.js",
+      "types": "./dist/api.d.ts"
+    },
+    "./api": {
+      "import": "./dist/api.js",
+      "types": "./dist/api.d.ts"
+    },
+    "./utils": {
+      "import": "./dist/utils.js",
+      "types": "./dist/utils.d.ts"
+    },
+    "./config": {
+      "import": "./dist/config.js",
+      "types": "./dist/config.d.ts"
+    }
   },
   "files": [
-    "api.js",
-    "cli.js",
-    "utils.js",
-    "config.js",
+    "dist",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "sai": "node cli.js",
-    "sai:help": "node cli.js --help",
-    "sai:examples": "node cli.js --examples",
-    "sai:credits": "node cli.js credits",
-    "sai:edit:erase": "node cli.js edit erase",
-    "sai:edit:inpaint": "node cli.js edit inpaint",
-    "sai:edit:outpaint": "node cli.js edit outpaint",
-    "sai:edit:search-replace": "node cli.js edit search-replace",
-    "sai:edit:search-recolor": "node cli.js edit search-recolor",
-    "sai:edit:remove-bg": "node cli.js edit remove-bg",
-    "sai:edit:replace-bg": "node cli.js edit replace-bg",
-    "sai:edit:examples": "node cli.js edit examples",
-    "sai:control:sketch": "node cli.js control sketch",
-    "sai:control:structure": "node cli.js control structure",
-    "sai:control:style": "node cli.js control style",
-    "sai:control:style-transfer": "node cli.js control style-transfer",
-    "sai:control:examples": "node cli.js control examples",
+    "build": "tsc",
+    "dev": "tsx src/cli.ts",
+    "sai": "tsx src/cli.ts",
+    "sai:help": "tsx src/cli.ts --help",
+    "sai:examples": "tsx src/cli.ts --examples",
+    "sai:credits": "tsx src/cli.ts credits",
+    "sai:edit:erase": "tsx src/cli.ts edit erase",
+    "sai:edit:inpaint": "tsx src/cli.ts edit inpaint",
+    "sai:edit:outpaint": "tsx src/cli.ts edit outpaint",
+    "sai:edit:search-replace": "tsx src/cli.ts edit search-replace",
+    "sai:edit:search-recolor": "tsx src/cli.ts edit search-recolor",
+    "sai:edit:remove-bg": "tsx src/cli.ts edit remove-bg",
+    "sai:edit:replace-bg": "tsx src/cli.ts edit replace-bg",
+    "sai:edit:examples": "tsx src/cli.ts edit examples",
+    "sai:control:sketch": "tsx src/cli.ts control sketch",
+    "sai:control:structure": "tsx src/cli.ts control structure",
+    "sai:control:style": "tsx src/cli.ts control style",
+    "sai:control:style-transfer": "tsx src/cli.ts control style-transfer",
+    "sai:control:examples": "tsx src/cli.ts control examples",
     "test": "vitest run",
     "test:watch": "vitest watch",
     "test:ui": "vitest --ui",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "prepublishOnly": "npm run build",
+    "semantic-release": "semantic-release"
   },
   "keywords": [
     "stability-ai",
@@ -54,7 +68,8 @@
     "text-to-image",
     "image-to-image",
     "upscale",
-    "cli"
+    "cli",
+    "typescript"
   ],
   "author": "img-gen Contributors",
   "license": "MIT",
@@ -78,11 +93,16 @@
   },
   "devDependencies": {
     "@semantic-release/changelog": "^6.0.3",
+    "@semantic-release/commit-analyzer": "^13.0.1",
     "@semantic-release/git": "^10.0.1",
     "@semantic-release/github": "^11.0.6",
     "@semantic-release/npm": "^12.0.2",
+    "@semantic-release/release-notes-generator": "^14.1.0",
+    "@types/node": "^24.10.1",
     "@vitest/coverage-v8": "^4.0.10",
     "semantic-release": "^24.2.9",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
     "vitest": "^4.0.10"
   }
 }

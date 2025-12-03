@@ -4,8 +4,8 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { StabilityAPI } from '../api.js';
-import { BASE_URL } from '../config.js';
+import { StabilityAPI } from '../src/api.js';
+import { BASE_URL } from '../src/config.js';
 
 describe('StabilityAPI Class', () => {
   let api;
@@ -353,7 +353,7 @@ describe('Mocked Generate Method Calls', () => {
     api = new StabilityAPI('test-key');
     // Mock buildFormData to prevent file system access
     const mockFormData = { append: vi.fn(), getHeaders: vi.fn(() => ({})) };
-    const utilsModule = await import('../utils.js');
+    const utilsModule = await import('../src/utils.js');
     vi.spyOn(utilsModule, 'buildFormData').mockResolvedValue(mockFormData);
   });
 
@@ -410,7 +410,7 @@ describe('Mocked Upscale Method Calls', () => {
     api = new StabilityAPI('test-key');
     // Mock buildFormData to prevent file system access
     const mockFormData = { append: vi.fn(), getHeaders: vi.fn(() => ({})) };
-    const utilsModule = await import('../utils.js');
+    const utilsModule = await import('../src/utils.js');
     vi.spyOn(utilsModule, 'buildFormData').mockResolvedValue(mockFormData);
   });
 
@@ -533,7 +533,7 @@ describe('Edit Methods', () => {
     beforeEach(async () => {
       // Create a mock FormData-like object
       const mockFormData = { append: vi.fn(), getHeaders: vi.fn(() => ({})) };
-      const utilsModule = await import('../utils.js');
+      const utilsModule = await import('../src/utils.js');
       mockBuildFormData = vi.spyOn(utilsModule, 'buildFormData').mockResolvedValue(mockFormData);
     });
 
@@ -830,7 +830,7 @@ describe('Control Methods', () => {
     beforeEach(async () => {
       // Create a mock FormData-like object
       const mockFormData = { append: vi.fn(), getHeaders: vi.fn(() => ({})) };
-      const utilsModule = await import('../utils.js');
+      const utilsModule = await import('../src/utils.js');
       mockBuildFormData = vi.spyOn(utilsModule, 'buildFormData').mockResolvedValue(mockFormData);
     });
 

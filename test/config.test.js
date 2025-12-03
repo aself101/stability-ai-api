@@ -28,7 +28,7 @@ import {
   validateControlParams,
   getControlConstraints,
   validateApiKeyFormat
-} from '../config.js';
+} from '../src/config.js';
 
 describe('Configuration Constants', () => {
   describe('Base URL', () => {

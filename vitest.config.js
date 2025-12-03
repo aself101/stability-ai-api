@@ -15,10 +15,11 @@ export default defineConfig({
         'test/**',
         'datasets/**',
         'docs/**',
+        'dist/**',
         '*.config.js',
-        'cli.js' // Exclude CLI from coverage (hard to test interactively)
+        'src/cli.ts' // Exclude CLI from coverage (hard to test interactively)
       ],
-      include: ['api.js', 'utils.js', 'config.js'],
+      include: ['src/**/*.ts'],
       thresholds: {
         lines: 70,
         functions: 70,
@@ -38,7 +39,7 @@ export default defineConfig({
 
     // Include/exclude patterns
     include: ['test/**/*.test.js'],
-    exclude: ['node_modules/**', 'datasets/**', 'docs/**'],
+    exclude: ['node_modules/**', 'datasets/**', 'docs/**', 'dist/**'],
 
     // Watch mode settings
     watch: false,

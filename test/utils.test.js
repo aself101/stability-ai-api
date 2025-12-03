@@ -29,8 +29,8 @@ import {
   randomNumber,
   setLogLevel,
   fileToBase64
-} from '../utils.js';
-import { validateApiKeyFormat } from '../config.js';
+} from '../src/utils.js';
+import { validateApiKeyFormat } from '../src/config.js';
 import { lookup } from 'dns/promises';
 
 describe('Utility Functions', () => {
