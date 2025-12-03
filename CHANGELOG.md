@@ -1,3 +1,10 @@
+# [0.4.0](https://github.com/aself101/stability-ai-api/compare/v0.3.1...v0.4.0) (2025-12-03)
+
+
+### Features
+
+* **typescript:** add full TypeScript support with exported type definitions ([5a14f52](https://github.com/aself101/stability-ai-api/commit/5a14f521993bbe227acb4b1c3548ca9db686eb7a))
+
 ## [0.3.1](https://github.com/aself101/stability-ai-api/compare/v0.3.0...v0.3.1) (2025-11-22)
 
 
