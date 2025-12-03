@@ -3,9 +3,11 @@
 [![npm version](https://img.shields.io/npm/v/stability-ai-api.svg)](https://www.npmjs.com/package/stability-ai-api)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node.js Version](https://img.shields.io/node/v/stability-ai-api)](https://nodejs.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue.svg)](https://www.typescriptlang.org/)
 [![Tests](https://img.shields.io/badge/tests-283%20passing-brightgreen)](test/)
+[![Coverage](https://img.shields.io/badge/coverage-76%25-green)](test/)
 
-A Node.js wrapper for the [Stability AI API](https://platform.stability.ai/docs/api-reference) that provides easy access to Stable Diffusion 3.5, image upscaling, editing, and control models. Generate stunning AI images, upscale, edit, and control them with professional quality through a simple command-line interface.
+A TypeScript/Node.js wrapper for the [Stability AI API](https://platform.stability.ai/docs/api-reference) that provides easy access to Stable Diffusion 3.5, image upscaling, editing, and control models. Generate stunning AI images, upscale, edit, and control them with professional quality through a simple command-line interface.
 
 This service follows the data-collection architecture pattern with organized data storage, automatic polling for async operations, retry logic, comprehensive logging, and CLI orchestration.
 
@@ -31,7 +33,7 @@ sai upscale fast --image ./photo.jpg
 [![asciicast](https://asciinema.org/a/03JPG9PhL5GGopR6yhaMCpmmu.svg)](https://asciinema.org/a/03JPG9PhL5GGopR6yhaMCpmmu)
 
 ### Programmatic Usage
-```javascript
+```typescript
 import { StabilityAPI } from 'stability-ai-api';
 
 const api = new StabilityAPI();
@@ -45,6 +47,8 @@ const result = await api.generateUltra({
 console.log('Image saved to:', result.image_path);
 ```
 
+Full TypeScript support with exported types for all parameters and responses.
+
 ## Table of Contents
 
 - [Overview](#overview)
@@ -53,6 +57,7 @@ console.log('Image saved to:', result.image_path);
 - [Control Operations](#control-operations)
 - [Authentication Setup](#authentication-setup)
 - [Installation](#installation)
+- [TypeScript Support](#typescript-support)
 - [Programmatic Usage](#programmatic-usage)
 - [CLI Usage](#cli-usage)
 - [Examples](#examples)
@@ -76,7 +81,8 @@ The Stability AI API provides access to state-of-the-art image generation and up
 - **Image Input Support** - Convert local files to Buffers with validation
 - **Organized Storage** - Structured directories with timestamped files and metadata
 - **CLI Orchestration** - Command-line tool with subcommands for generation and upscaling
-- **Comprehensive Testing** - 283 tests with Vitest for reliability
+- **Full TypeScript Support** - Complete type definitions for all API methods, parameters, and responses
+- **Comprehensive Testing** - 283 tests with 76% coverage (api.ts: 64.56%, config.ts: 92.22%, utils.ts: 73.38%)
 
 ### Endpoint Summary
 
@@ -423,24 +429,106 @@ npm install
 npm test  # Run 283 tests
 ```
 
+## TypeScript Support
+
+This package is written in TypeScript and includes full type definitions. All API methods, parameters, and responses are fully typed.
+
+### Exported Types
+
+```typescript
+import {
+  StabilityAPI,
+  // Parameter types
+  UltraParams,
+  CoreParams,
+  SD3Params,
+  UpscaleFastParams,
+  UpscaleConservativeParams,
+  UpscaleCreativeParams,
+  // Edit parameter types
+  EditEraseParams,
+  EditInpaintParams,
+  EditOutpaintParams,
+  EditSearchReplaceParams,
+  EditSearchRecolorParams,
+  EditRemoveBackgroundParams,
+  EditReplaceBackgroundParams,
+  // Control parameter types
+  ControlSketchParams,
+  ControlStructureParams,
+  ControlStyleParams,
+  ControlStyleTransferParams,
+  // Response types
+  ImageResult,
+  TaskResult
+} from 'stability-ai-api';
+
+// Types are automatically inferred
+const api = new StabilityAPI();
+const result = await api.generateUltra({
+  prompt: 'a cat',  // TypeScript will validate all parameters
+  aspect_ratio: '16:9'
+});
+```
+
+### Type-Safe Parameters
+
+All generation methods have strict parameter typing:
+
+```typescript
+// TypeScript will catch invalid parameters at compile time
+const result = await api.generateUltra({
+  prompt: 'a landscape',
+  aspect_ratio: '16:9',    // '1:1' | '16:9' | '21:9' | '2:3' | '3:2' | '4:5' | '5:4' | '9:16' | '9:21'
+  seed: 42,                // optional number (0-4294967294)
+  output_format: 'png'     // 'jpeg' | 'png' | 'webp'
+});
+
+// Edit operations are also fully typed
+const edited = await api.searchAndReplace(
+  './image.jpg',
+  'golden retriever',      // prompt
+  'cat',                   // search_prompt
+  {
+    negative_prompt: 'blurry',
+    grow_mask: 5,
+    output_format: 'png'
+  }
+);
+```
+
+### Building from Source
+
+```bash
+# Install dependencies
+npm install
+
+# Build TypeScript to JavaScript
+npm run build
+
+# Output is in dist/
+ls dist/
+# api.js, api.d.ts, cli.js, cli.d.ts, config.js, config.d.ts, utils.js, utils.d.ts, types/
+```
+
 ## Programmatic Usage
 
 You can use the Stability AI API directly in your Node.js applications.
 
 ### Basic Setup
 
-```javascript
+```typescript
 // If installed via npm
 import { StabilityAPI } from 'stability-ai-api';
 
 // If running from source
-import { StabilityAPI } from './api.js';
+import { StabilityAPI } from './src/api.js';
 
 // Initialize with API key (reads from env vars by default)
 const api = new StabilityAPI();
 
 // Or explicitly provide API key
-const api = new StabilityAPI('your-api-key-here');
+const api = new StabilityAPI({ apiKey: 'your-api-key-here' });
 ```
 
 ### Generation Methods
@@ -790,35 +878,6 @@ try {
   // Handle without retry
   console.error('Failed:', error.message);
 }
-```
-
-### TypeScript Support
-
-This package is written in TypeScript and includes full type definitions. All types are exported for TypeScript consumers:
-
-```typescript
-import { StabilityAPI } from 'stability-ai-api';
-import type {
-  UltraParams,
-  CoreParams,
-  SD3Params,
-  UpscaleCreativeParams,
-  EditEraseParams,
-  ControlSketchParams,
-  ImageResult,
-  TaskResult
-} from 'stability-ai-api';
-
-const api = new StabilityAPI({ apiKey: 'your-key' });
-
-// Full type safety and autocomplete
-const params: UltraParams = {
-  prompt: 'A majestic mountain landscape',
-  aspect_ratio: '16:9',
-  output_format: 'png'
-};
-
-const result: ImageResult = await api.generateUltra(params);
 ```
 
 ## CLI Usage
