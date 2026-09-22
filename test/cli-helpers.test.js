@@ -94,6 +94,10 @@ describe('buildEditParams', () => {
     expect(buildEditParams('inpaint', { image: 'x', outputFormat: 'png', prompt: 'a fern' })).toEqual({ output_format: 'png', prompt: 'a fern' });
   });
 
+  it('outpaint drops zero directions (0 means "do not extend") and keeps 1', () => {
+    expect(buildEditParams('outpaint', { image: 'x', left: 0, right: 1, up: 0, down: 0 })).toEqual({ right: 1 });
+  });
+
   it('search-and-replace maps --search to search_prompt', () => {
     expect(buildEditParams('search-and-replace', { image: 'x', outputFormat: 'png', prompt: 'dog', search: 'cat', growMask: 3 })).toEqual({
       output_format: 'png', prompt: 'dog', search_prompt: 'cat', grow_mask: 3,

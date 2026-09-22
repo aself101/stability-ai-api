@@ -1071,3 +1071,13 @@ describe('importing the library has no .env side effect', () => {
     }
   }, 20000);
 });
+
+describe('replace-background range and length edges', () => {
+  const base = { background_prompt: 'b' };
+  it.each([[0, true], [1, true], [-0.01, false], [1.01, false]])('light_source_strength %s valid=%s (with a direction)', (v, valid) => {
+    expect(validateEditParams('replace-background-and-relight', { ...base, light_source_direction: 'left', light_source_strength: v }).valid).toBe(valid);
+  });
+  it.each([[10000, true], [10001, false]])('background_prompt of %s characters valid=%s', (n, valid) => {
+    expect(validateEditParams('replace-background-and-relight', { background_prompt: 'a'.repeat(n) }).valid).toBe(valid);
+  });
+});

@@ -279,6 +279,21 @@ describe('Image Validation (Security)', () => {
       }
     });
 
+    // Both edges of every IPv4 private range, plus the adjacent public
+    // addresses: a range regex that drops its top end (e.g. 172.31.x.x)
+    // passed the whole suite until ship run #3 mutated it.
+    it.each([
+      '10.0.0.0', '10.255.255.255', '172.16.0.0', '172.31.255.255', '192.168.0.0', '192.168.255.255',
+      '169.254.0.1', '169.254.255.254', '100.64.0.0', '100.127.255.255', '127.255.255.254', '0.0.0.1',
+    ])('blocks private/reserved edge %s', async (ip) => {
+      await expect(validateImageUrl(`https://${ip}/x.png`)).rejects.toThrow(/internal|private|localhost/);
+    });
+
+    it.each(['9.255.255.255', '11.0.0.1', '172.15.255.255', '172.32.0.1', '192.167.255.255', '192.169.0.1', '100.63.255.255', '100.128.0.0', '223.255.255.254'])(
+      'allows the adjacent public address %s', async (ip) => {
+        await expect(validateImageUrl(`https://${ip}/x.png`)).resolves.toBe(`https://${ip}/x.png`);
+      });
+
     // The hex spellings are what validateImageUrl sees after new URL() parsing:
     // https://[::ffff:127.0.0.1] becomes [::ffff:7f00:1]. Until 1.0 only the
     // dotted form was recognised, so the hex form of loopback got through
