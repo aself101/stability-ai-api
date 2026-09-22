@@ -16,7 +16,7 @@
 
 import { logger, buildFormData, createSpinner } from './utils.js';
 import { request, requestJson, StabilityHttpError, StabilityNetworkError, StabilityTimeoutError } from './http.js';
-import { BASE_URL, MODEL_ENDPOINTS, EDIT_ENDPOINTS, CONTROL_ENDPOINTS, ENDPOINT_FIELDS, DEFAULT_POLL_INTERVAL, DEFAULT_TIMEOUT, MAX_RETRIES } from './config.js';
+import { BASE_URL, MODEL_ENDPOINTS, EDIT_ENDPOINTS, CONTROL_ENDPOINTS, ENDPOINT_FIELDS, DEFAULT_POLL_INTERVAL, DEFAULT_TIMEOUT, MAX_RETRIES, imageToImageErrors } from './config.js';
 import type {
   ImageResult,
   TaskResult,
@@ -59,6 +59,13 @@ export function isTransientError(error: unknown): boolean {
   if (error instanceof StabilityHttpError) return TRANSIENT_STATUSES.has(error.status);
   if (error instanceof StabilityNetworkError) return error.retryable;
   return error instanceof StabilityTimeoutError;
+}
+
+/** Throw the collected validation errors, if any, before a request is made. */
+function throwIfInvalid(errors: string[]): void {
+  if (errors.length > 0) {
+    throw new Error(errors.join('; '));
+  }
 }
 
 /**
@@ -390,6 +397,7 @@ export class StabilityAPI {
   async generateUltra(params: UltraParams): Promise<ImageResult> {
     logger.info('Generating image with Stable Image Ultra');
 
+    throwIfInvalid(imageToImageErrors('stable-image-ultra', params));
     return await this._submit(MODEL_ENDPOINTS['stable-image-ultra'], params, { image: params.image }) as ImageResult;
   }
 
@@ -421,7 +429,11 @@ export class StabilityAPI {
   async generateSD3(params: SD3Params): Promise<ImageResult> {
     logger.info(`Generating image with SD 3.5 (${params.model ?? 'server default: sd3.5-large'})`);
 
-    return await this._submit(MODEL_ENDPOINTS['sd3'], params) as ImageResult;
+    throwIfInvalid(imageToImageErrors('sd3', params));
+    // mode is derived, never taken from the caller: with an image it must be
+    // image-to-image; without one the server default (text-to-image) applies.
+    const values = { ...params, mode: params.image ? 'image-to-image' : undefined };
+    return await this._submit(MODEL_ENDPOINTS['sd3'], values, { image: params.image }) as ImageResult;
   }
 
   /**

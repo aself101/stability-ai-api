@@ -57,7 +57,8 @@ interface GlobalOptions {
 interface GenerateOptions {
   prompt: string[];
   negativePrompt?: string;
-  aspectRatio: string;
+  aspectRatio?: string;
+  cfgScale?: number;
   seed?: number;
   outputFormat: string;
   image?: string;
@@ -162,6 +163,19 @@ GENERATE COMMANDS
        --prompt "modern minimalist logo design" \\
        --model sd3.5-large-turbo \\
        --aspect-ratio "1:1"
+
+   SD 3.5 Flash - cheapest and fastest (4 steps, cfg-scale 1)
+   $ sai generate sd3 \\
+       --prompt "watercolor fox in the snow" \\
+       --model sd3.5-flash
+
+   SD 3.5 - Image-to-image (no --aspect-ratio: output keeps the input's shape)
+   $ sai generate sd3 \\
+       --prompt "the same scene at golden hour" \\
+       --image ./photo.jpg \\
+       --strength 0.7 \\
+       --cfg-scale 5 \\
+       --style-preset photographic
 
 6. Batch generation - Multiple prompts
    $ sai generate core \\
@@ -294,8 +308,9 @@ generateCmd
   .option('-a, --aspect-ratio <ratio>', 'Aspect ratio (e.g., 16:9, 1:1)', '1:1')
   .option('-s, --seed <number>', 'Random seed (0-4294967294)', parseInt)
   .option('-f, --output-format <format>', 'Output format (jpeg, png, webp)', 'png')
-  .option('-i, --image <path>', 'Input image for image-to-image')
-  .option('--strength <number>', 'Strength for image-to-image (0-1)', parseFloat)
+  .option('-i, --image <path>', 'Input image for image-to-image (requires --strength)')
+  .option('--strength <number>', 'Image-to-image strength (0-1; 0 keeps the input, 1 ignores it)', parseFloat)
+  .option('--style-preset <style>', `Style preset: ${STYLE_PRESETS.join(', ')}`)
   .action(async (options: GenerateOptions, command: Command) => {
     await handleGenerateCommand('stable-image-ultra', options, command.optsWithGlobals() as GlobalOptions);
   });
@@ -323,11 +338,17 @@ generateCmd
   .command('sd3')
   .description('Generate with Stable Diffusion 3.5')
   .option('-p, --prompt <text...>', 'Text prompt(s) - can specify multiple', [])
-  .option('-m, --model <name>', 'SD3 model (sd3.5-large, sd3.5-medium, sd3.5-large-turbo)', 'sd3.5-large')
+  .option('-m, --model <name>', 'SD3.5 model (sd3.5-large, sd3.5-large-turbo, sd3.5-medium, sd3.5-flash)', 'sd3.5-large')
   .option('-n, --negative-prompt <text>', 'Negative prompt')
-  .option('-a, --aspect-ratio <ratio>', 'Aspect ratio', '1:1')
+  // No default: aspect ratio is text-to-image only on SD3.5, and the server
+  // default is already 1:1.
+  .option('-a, --aspect-ratio <ratio>', 'Aspect ratio, text-to-image only (server default 1:1)')
   .option('-s, --seed <number>', 'Random seed', parseInt)
   .option('-f, --output-format <format>', 'Output format (jpeg, png, webp)', 'png')
+  .option('-i, --image <path>', 'Input image: makes this image-to-image (requires --strength)')
+  .option('--strength <number>', 'Image-to-image strength (0-1; 0 keeps the input, 1 ignores it)', parseFloat)
+  .option('--cfg-scale <number>', 'Prompt adherence 1-10 (server default 4 Large/Medium, 1 Turbo/Flash)', parseFloat)
+  .option('--style-preset <style>', `Style preset: ${STYLE_PRESETS.join(', ')}`)
   .action(async (options: GenerateOptions, command: Command) => {
     await handleGenerateCommand('sd3', options, command.optsWithGlobals() as GlobalOptions);
   });
@@ -668,16 +689,20 @@ async function handleGenerateCommand(model: string, options: GenerateOptions, gl
       };
 
       // Add model-specific parameters
-      if (model === 'stable-image-ultra' && options.image) {
-        logger.info('Converting input image for image-to-image...');
+      // image and strength are set together or not at all; validation below
+      // rejects either one alone. (0.4.0 dropped --strength silently when
+      // --image was missing.)
+      if (model === 'stable-image-ultra' || model === 'sd3') {
         params.image = options.image;
         params.strength = options.strength;
+        if (options.image) {
+          logger.info('Image-to-image: using input image ' + options.image);
+        }
       }
-      if (model === 'stable-image-core' && options.stylePreset) {
-        params.style_preset = options.stylePreset;
-      }
+      params.style_preset = options.stylePreset;
       if (model === 'sd3') {
         params.model = options.model;
+        params.cfg_scale = options.cfgScale;
       }
 
       // Validate parameters

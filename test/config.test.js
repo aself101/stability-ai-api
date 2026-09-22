@@ -28,7 +28,9 @@ import {
   getEditConstraints,
   validateControlParams,
   getControlConstraints,
-  validateApiKeyFormat
+  validateApiKeyFormat,
+  imageToImageErrors,
+  MODEL_CONSTRAINTS,
 } from '../src/config.js';
 
 describe('Configuration Constants', () => {
@@ -261,7 +263,7 @@ describe('Configuration Functions', () => {
 
     describe('sd3 validation', () => {
       it('should accept valid SD3 models', () => {
-        const models = ['sd3.5-large', 'sd3.5-medium', 'sd3.5-large-turbo'];
+        const models = ['sd3.5-large', 'sd3.5-medium', 'sd3.5-large-turbo', 'sd3.5-flash'];
         models.forEach(model => {
           const result = validateModelParams('sd3', { model });
           expect(result.valid).toBe(true);
@@ -272,6 +274,39 @@ describe('Configuration Functions', () => {
         const result = validateModelParams('sd3', { model: 'invalid-model' });
         expect(result.valid).toBe(false);
         expect(result.errors.some(e => e.includes('Invalid model'))).toBe(true);
+      });
+
+      it('should accept exactly the four SD3.5 models', () => {
+        expect(MODEL_CONSTRAINTS.sd3.models).toEqual(['sd3.5-large', 'sd3.5-large-turbo', 'sd3.5-medium', 'sd3.5-flash']);
+      });
+
+      it.each([[1, true], [10, true], [4.5, true], [0.5, false], [11, false]])('cfg_scale %s valid=%s', (cfg_scale, valid) => {
+        expect(validateModelParams('sd3', { cfg_scale }).valid).toBe(valid);
+      });
+
+      it('should accept text-to-image and a complete image-to-image request', () => {
+        expect(validateModelParams('sd3', { prompt: 'p', aspect_ratio: '16:9' }).valid).toBe(true);
+        expect(validateModelParams('sd3', { prompt: 'p', image: 'x.png', strength: 0.5 }).valid).toBe(true);
+      });
+
+      it.each([
+        [{ image: 'x.png' }, 'strength is required'],
+        [{ strength: 0.5 }, 'strength applies only to image-to-image'],
+        [{ image: 'x.png', strength: 0.5, aspect_ratio: '1:1' }, 'aspect_ratio is text-to-image only'],
+        [{ image: 'x.png', strength: 1.5 }, 'Strength must be between 0 and 1'],
+      ])('should reject %o', (params, message) => {
+        const result = validateModelParams('sd3', params);
+        expect(result.valid).toBe(false);
+        expect(result.errors.join('\n')).toContain(message);
+      });
+
+      it('should not apply the aspect_ratio rule to Ultra', () => {
+        expect(validateModelParams('stable-image-ultra', { image: 'x.png', strength: 0.5, aspect_ratio: '1:1' }).valid).toBe(true);
+        expect(validateModelParams('stable-image-ultra', { strength: 0.5 }).valid).toBe(false);
+      });
+
+      it('should not apply image-to-image rules to models without strength', () => {
+        expect(imageToImageErrors('stable-image-core', { image: 'x.png' })).toEqual([]);
       });
     });
 

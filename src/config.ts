@@ -82,16 +82,21 @@ export const MODEL_ENDPOINTS: ModelEndpoints = {
  */
 export const ENDPOINT_FIELDS: Readonly<Record<string, EndpointFields>> = {
   '/v2beta/stable-image/generate/ultra': {
-    text: ['prompt', 'negative_prompt', 'aspect_ratio', 'seed', 'output_format', 'strength'],
+    text: ['prompt', 'negative_prompt', 'aspect_ratio', 'seed', 'output_format', 'style_preset', 'strength'],
     files: ['image'],
   },
   '/v2beta/stable-image/generate/core': {
     text: ['prompt', 'negative_prompt', 'aspect_ratio', 'seed', 'output_format', 'style_preset'],
     files: [],
   },
+  // `mode` is derived by generateSD3 from whether `image` is set — never a
+  // caller parameter (see docs/DECISIONS.md).
   '/v2beta/stable-image/generate/sd3': {
-    text: ['prompt', 'model', 'negative_prompt', 'aspect_ratio', 'seed', 'output_format'],
-    files: [],
+    text: [
+      'prompt', 'mode', 'strength', 'aspect_ratio', 'model', 'seed', 'output_format',
+      'style_preset', 'negative_prompt', 'cfg_scale',
+    ],
+    files: ['image'],
   },
   '/v2beta/stable-image/upscale/fast': {
     text: ['output_format'],
@@ -314,8 +319,15 @@ export const MODEL_CONSTRAINTS: ModelConstraints = {
     aspectRatios: ASPECT_RATIOS,
     outputFormats: OUTPUT_FORMATS,
     seed: { min: 0, max: 4294967294 },
-    models: ['sd3.5-large', 'sd3.5-medium', 'sd3.5-large-turbo'],
-    stylePresets: STYLE_PRESETS
+    strength: { min: 0, max: 1 }, // for image-to-image
+    // Server default 4 for Large/Medium, 1 for Turbo/Flash.
+    cfg_scale: { min: 1, max: 10 },
+    // sd3.5-flash is absent from the published OpenAPI `model` enum, but the
+    // server's own validator lists it and accepts it (probed 2026-09-22), and
+    // the spec's prose and pricing name it. See docs/DECISIONS.md.
+    models: ['sd3.5-large', 'sd3.5-large-turbo', 'sd3.5-medium', 'sd3.5-flash'],
+    stylePresets: STYLE_PRESETS,
+    imageToImageForbidsAspectRatio: true
   },
   'upscale-fast': {
     outputFormats: OUTPUT_FORMATS
@@ -432,6 +444,8 @@ interface ValidationParams {
   seed?: number;
   strength?: number;
   creativity?: number;
+  cfg_scale?: number;
+  image?: unknown;
   model?: string;
   style_preset?: string;
   grow_mask?: number;
@@ -532,6 +546,16 @@ export function validateModelParams(model: string, params: ValidationParams): Va
     }
   }
 
+  // Validate cfg_scale (SD3.5)
+  if (params.cfg_scale !== undefined && constraints.cfg_scale) {
+    const { min, max } = constraints.cfg_scale;
+    if (params.cfg_scale < min || params.cfg_scale > max) {
+      errors.push(`cfg_scale must be between ${min} and ${max} for ${model}`);
+    }
+  }
+
+  errors.push(...imageToImageErrors(model, params));
+
   // Validate creativity (for creative upscale)
   if (params.creativity !== undefined && constraints.creativity) {
     const { min, max } = constraints.creativity;
@@ -562,6 +586,38 @@ export function validateModelParams(model: string, params: ValidationParams): Va
     valid: errors.length === 0,
     errors
   };
+}
+
+/**
+ * Image-to-image rules for the generate endpoints that accept an input image
+ * (Ultra, SD3.5): `image` and `strength` go together — the server requires
+ * strength with an image, and a strength without one does nothing — and on
+ * SD3.5 `aspect_ratio` is text-to-image only (the output takes the input's
+ * shape). Shared by `validateModelParams` (CLI) and the API methods, which
+ * enforce it before any request so programmatic callers get the same message.
+ *
+ * @returns error messages; empty when the combination is valid
+ */
+export function imageToImageErrors(
+  model: string,
+  params: { image?: unknown; strength?: number | null; aspect_ratio?: string }
+): string[] {
+  const constraints = MODEL_CONSTRAINTS[model];
+  if (!constraints?.strength) return [];
+
+  const errors: string[] = [];
+  const hasImage = params.image !== undefined && params.image !== null && params.image !== '';
+  const hasStrength = params.strength !== undefined && params.strength !== null;
+  if (hasImage && !hasStrength) {
+    errors.push(`strength is required with an input image for ${model} (0-1; 0 keeps the input, 1 ignores it)`);
+  }
+  if (hasStrength && !hasImage) {
+    errors.push(`strength applies only to image-to-image for ${model}; provide an input image or drop strength`);
+  }
+  if (hasImage && params.aspect_ratio !== undefined && constraints.imageToImageForbidsAspectRatio) {
+    errors.push(`aspect_ratio is text-to-image only for ${model}; image-to-image keeps the input's aspect ratio`);
+  }
+  return errors;
 }
 
 /**

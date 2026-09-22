@@ -34,6 +34,8 @@ semantic-release from commit subjects and are kept as they were.
   `'png'`.
 - Every payload is built from one registry, `ENDPOINT_FIELDS` (exported from
   `stability-ai-api/config`): the exact text and file fields each endpoint accepts.
+- `sai generate sd3` no longer defaults `--aspect-ratio` to `1:1`. The server default is
+  the same, and a client default would make every image-to-image call invalid.
 - **BREAKING (types) — `UpscaleParams.prompt` is required**, and
   `upscaleConservative` / `upscaleCreative` no longer default `params` to `{}`. Both
   endpoints answer `400 prompt: required` without it (confirmed against the server
@@ -42,6 +44,18 @@ semantic-release from commit subjects and are kept as they were.
 
 ### Added
 
+- **SD 3.5 Flash** (`model: 'sd3.5-flash'`, 2.5 credits, distilled from Medium). It is
+  missing from the published OpenAPI `model` enum, but the server's own validator lists
+  and accepts it (probed 2026-09-22), and the spec's prose and pricing name it.
+- **SD 3.5 image-to-image**: `generateSD3({ image, strength })`. `mode` is derived:
+  the wrapper sends `mode=image-to-image` when `image` is set, and there is no `mode`
+  parameter to contradict it. `aspect_ratio` is rejected in image-to-image, because the
+  API accepts it only for text-to-image. CLI: `sai generate sd3 --image --strength`.
+- SD 3.5 `cfg_scale` (1–10). CLI: `--cfg-scale`.
+- `style_preset` on Ultra and SD 3.5. Both endpoints accept it; 0.4.0 sent it only for
+  Core. CLI: `--style-preset` on `generate ultra` and `generate sd3`.
+- `imageToImageErrors(model, params)`: the image/strength/aspect-ratio rules, shared by
+  `validateModelParams` and the API methods.
 - Conservative upscale `creativity` (0.2–0.5, server default 0.35) — the endpoint
   accepts it; 0.4.0 never sent it. CLI: `sai upscale conservative --creativity`.
 - Creative upscale `style_preset` — likewise accepted and never sent. CLI:
@@ -54,6 +68,9 @@ semantic-release from commit subjects and are kept as they were.
 
 ### Fixed
 
+- Ultra no longer sends `strength` without an image, and `sai generate ultra
+  --strength` without `--image` is an error instead of being dropped silently. An
+  image without `strength` is also rejected; the API requires both together.
 - **Polling never retried anything.** The classifier matched `'rate limit'` against a
   message reading `'Rate limit exceeded…'`, and `'502'`/`'503'` against axios's
   development message, which production sanitising replaced. `MAX_RETRIES` was

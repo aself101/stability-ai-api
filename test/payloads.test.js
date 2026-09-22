@@ -38,6 +38,11 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/** Fields the wrapper derives rather than forwarding; their expected wire value. */
+const DERIVED = {
+  '/v2beta/stable-image/generate/sd3': { mode: 'image-to-image' },
+};
+
 /** A distinct value per field, so a crossed wire (a → b) is visible. */
 function valuesFor(path) {
   return Object.fromEntries(ENDPOINT_FIELDS[path].text.map(f => [f, `${f}-value`]));
@@ -60,7 +65,13 @@ function filesFor(path) {
 const CALLS = {
   '/v2beta/stable-image/generate/ultra': (api, v, f) => api.generateUltra({ ...v, ...f }),
   '/v2beta/stable-image/generate/core': (api, v) => api.generateCore(v),
-  '/v2beta/stable-image/generate/sd3': (api, v, f) => api.generateSD3({ ...v, ...f }),
+  // SD3.5 has two request shapes: aspect_ratio is text-to-image only, and
+  // image/strength/mode are image-to-image only. Together they cover the registry.
+  '/v2beta/stable-image/generate/sd3': async (api, v, f) => {
+    const { mode, image, strength, aspect_ratio, ...common } = v;
+    await api.generateSD3({ ...common, aspect_ratio });
+    await api.generateSD3({ ...common, image: f.image, strength, mode: 'text-to-image' /* ignored: derived */ });
+  },
   '/v2beta/stable-image/upscale/fast': (api, v, f) => api.upscaleFast(f.image, v.output_format),
   '/v2beta/stable-image/upscale/conservative': (api, v, f) => api.upscaleConservative(f.image, v),
   '/v2beta/stable-image/upscale/creative': (api, v, f) => api.upscaleCreative(f.image, v),
@@ -91,13 +102,16 @@ describe('every declared field reaches the wire', () => {
 
     await CALLS[path](api, v, f);
 
-    expect(calls).toHaveLength(1);
-    expect(calls[0].url).toBe(`${BASE_URL}${path}`);
-    const sent = formFields(calls[0].init);
+    expect(calls.length).toBeGreaterThan(0);
+    const sent = {};
+    for (const call of calls) {
+      expect(call.url).toBe(`${BASE_URL}${path}`);
+      Object.assign(sent, formFields(call.init));
+    }
     const { text, files } = ENDPOINT_FIELDS[path];
     expect(Object.keys(sent).sort()).toEqual([...text, ...files].sort());
     for (const field of text) {
-      expect(sent[field], field).toBe(`${field}-value`);
+      expect(sent[field], field).toBe(DERIVED[path]?.[field] ?? `${field}-value`);
     }
     for (const field of files) {
       expect(sent[field], field).toEqual({ filename: `${field}.png`, type: 'image/png', size: PNG_BYTES.length });
@@ -145,5 +159,64 @@ describe('required prompts on the upscalers', () => {
 
     await expect(call(api)).rejects.toThrow(message);
     expect(calls).toHaveLength(0);
+  });
+});
+
+describe('SD3.5 request shapes', () => {
+  const api = () => new StabilityAPI('sk-test-key-1234567890', BASE_URL, 'error');
+
+  it('text-to-image sends no mode, image or strength', async () => {
+    const calls = stubFetch(() => imageResponse());
+    await api().generateSD3({ prompt: 'p', model: 'sd3.5-flash', cfg_scale: 1, style_preset: 'anime', aspect_ratio: '16:9' });
+    expect(formFields(calls[0].init)).toEqual({
+      prompt: 'p', aspect_ratio: '16:9', model: 'sd3.5-flash', style_preset: 'anime', cfg_scale: '1',
+    });
+  });
+
+  it('image-to-image sends mode=image-to-image with image and strength, and no aspect_ratio', async () => {
+    const calls = stubFetch(() => imageResponse());
+    await api().generateSD3({ prompt: 'p', image: png, strength: 0.95 });
+    expect(formFields(calls[0].init)).toEqual({
+      prompt: 'p', mode: 'image-to-image', strength: '0.95', image: expect.objectContaining({ type: 'image/png' }),
+    });
+  });
+
+  it('a caller cannot force mode: it follows the image', async () => {
+    const calls = stubFetch(() => imageResponse());
+    await api().generateSD3({ prompt: 'p', mode: 'image-to-image' });
+    expect(formFields(calls[0].init)).toEqual({ prompt: 'p' });
+  });
+
+  it.each([
+    ['image without strength', { prompt: 'p', image: 'IMG' }, 'strength is required with an input image'],
+    ['strength without image', { prompt: 'p', strength: 0.5 }, 'strength applies only to image-to-image'],
+    ['aspect_ratio with image', { prompt: 'p', image: 'IMG', strength: 0.5, aspect_ratio: '1:1' }, 'aspect_ratio is text-to-image only'],
+  ])('rejects %s before any request', async (_n, params, message) => {
+    const calls = stubFetch(() => imageResponse());
+    const p = { ...params, image: params.image === 'IMG' ? png : undefined };
+    await expect(api().generateSD3(p)).rejects.toThrow(message);
+    expect(calls).toHaveLength(0);
+  });
+});
+
+describe('Ultra image-to-image', () => {
+  const api = () => new StabilityAPI('sk-test-key-1234567890', BASE_URL, 'error');
+
+  it('rejects strength without an image (0.4.0 sent it anyway)', async () => {
+    const calls = stubFetch(() => imageResponse());
+    await expect(api().generateUltra({ prompt: 'p', strength: 0.5 })).rejects.toThrow('strength applies only to image-to-image');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('rejects an image without strength', async () => {
+    const calls = stubFetch(() => imageResponse());
+    await expect(api().generateUltra({ prompt: 'p', image: png })).rejects.toThrow('strength is required');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('allows aspect_ratio with an image (only SD3.5 forbids it)', async () => {
+    const calls = stubFetch(() => imageResponse());
+    await api().generateUltra({ prompt: 'p', image: png, strength: 0.4, aspect_ratio: '16:9', style_preset: 'cinematic' });
+    expect(formFields(calls[0].init)).toMatchObject({ aspect_ratio: '16:9', strength: '0.4', style_preset: 'cinematic' });
   });
 });

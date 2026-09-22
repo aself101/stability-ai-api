@@ -91,7 +91,7 @@ The Stability AI API provides access to state-of-the-art image generation and up
 | **Generate** |
 | Stable Image Ultra | `sai generate ultra` | `generateUltra(options)` | Sync | Photorealistic 1MP, optional image-to-image |
 | Stable Image Core | `sai generate core` | `generateCore(options)` | Sync | Fast SDXL successor, style presets |
-| Stable Diffusion 3.5 | `sai generate sd3` | `generateSD3(options)` | Sync | Three variants: large, medium, turbo |
+| Stable Diffusion 3.5 | `sai generate sd3` | `generateSD3(options)` | Sync | Large, Large Turbo, Medium, Flash; optional image-to-image |
 | **Upscale** |
 | Fast Upscale | `sai upscale fast` | `upscaleFast(image, options)` | Sync | 4x in ~1 second (input ≤1MP) |
 | Conservative Upscale | `sai upscale conservative` | `upscaleConservative(image, options)` | Sync | 20-40x to 4MP, minimal alteration |
@@ -123,8 +123,9 @@ Photorealistic 1MP image generation with image-to-image support.
 - `prompt` - Text description of desired image (required)
 - `aspect_ratio` - Image proportions (1:1, 16:9, 21:9, 2:3, 3:2, 4:5, 5:4, 9:16, 9:21)
 - `seed` - Random seed (0 to 4,294,967,294)
-- `image` - Optional input image for image-to-image generation
-- `strength` - Image influence strength (0.0-1.0, for image-to-image)
+- `image` - Optional input image for image-to-image generation (requires `strength`)
+- `strength` - Image-to-image strength (0-1: 0 keeps the input, 1 ignores it; requires `image`)
+- `style_preset` - Style preset (same 17 presets as Core)
 
 ### Stable Image Core
 Fast and affordable SDXL successor with style presets.
@@ -138,16 +139,34 @@ Fast and affordable SDXL successor with style presets.
 - `style_preset` - Style preset (photographic, anime, cinematic, digital-art, fantasy-art, etc.)
 
 ### Stable Diffusion 3.5
-Latest SD3.5 models with three variants.
+SD3.5 models, text-to-image and image-to-image, on one endpoint.
 
-**Models:** sd3.5-large, sd3.5-medium, sd3.5-large-turbo
-**Best for:** General-purpose generation, fast turbo mode
+| Model | Credits | Notes |
+|---|---|---|
+| `sd3.5-large` | 6.5 | Server default |
+| `sd3.5-large-turbo` | 4 | Distilled Large, fewer steps |
+| `sd3.5-medium` | 3.5 | |
+| `sd3.5-flash` | 2.5 | Distilled Medium, 4 steps |
+
+Credit costs are from the API reference as of 2026-09-22.
+
+**Best for:** General-purpose generation; Flash and Turbo for speed and cost
 
 **Parameters:**
 - `prompt` - Text description of desired image (required)
-- `model` - Model variant (sd3.5-large, sd3.5-medium, sd3.5-large-turbo)
-- `aspect_ratio` - Image proportions (1:1, 16:9, 21:9, 2:3, 3:2, 4:5, 5:4, 9:16, 9:21)
+- `model` - Model variant (table above; default `sd3.5-large`)
+- `negative_prompt` - What to avoid
+- `aspect_ratio` - Image proportions (1:1, 16:9, 21:9, 2:3, 3:2, 4:5, 5:4, 9:16, 9:21) — **text-to-image only**
+- `image` - Input image. Setting it makes the request image-to-image; requires `strength`
+- `strength` - Image-to-image strength (0-1: 0 keeps the input, 1 ignores it). For Flash the API suggests 0.94-0.97
+- `cfg_scale` - Prompt adherence (1-10; server default 4 for Large/Medium, 1 for Turbo/Flash)
+- `style_preset` - Style preset (same 17 presets as Core)
 - `seed` - Random seed (0 to 4,294,967,294)
+
+There is no `mode` parameter: the wrapper sends `mode=image-to-image` when `image` is
+set, and otherwise lets the server default (text-to-image) apply. An image-to-image
+request with `aspect_ratio`, or `image`/`strength` without the other, is rejected
+before it is sent.
 
 ### Upscale Fast
 4x upscaling in approximately 1 second (synchronous).
@@ -585,11 +604,20 @@ const result = await api.generateCore({
 ```javascript
 const result = await api.generateSD3({
   prompt: 'fantasy castle on a floating island',
-  model: 'sd3.5-large-turbo',  // sd3.5-large, sd3.5-medium, sd3.5-large-turbo
+  model: 'sd3.5-large-turbo',  // sd3.5-large, sd3.5-large-turbo, sd3.5-medium, sd3.5-flash
   aspect_ratio: '16:9',
   negative_prompt: 'blurry, low quality',
+  cfg_scale: 2,
   seed: 999,
   output_format: 'webp'
+});
+
+// Image-to-image: no aspect_ratio (the output keeps the input's shape)
+const restyled = await api.generateSD3({
+  prompt: 'the same castle at golden hour, oil painting',
+  image: './castle.png',
+  strength: 0.7,
+  style_preset: 'fantasy-art'
 });
 ```
 
@@ -931,6 +959,16 @@ sai generate sd3 \
   --prompt "fantasy castle on floating island" \
   --model sd3.5-large-turbo \
   --aspect-ratio "16:9"
+
+# Flash: cheapest and fastest
+sai generate sd3 --prompt "watercolor fox in the snow" --model sd3.5-flash
+
+# Image-to-image (no --aspect-ratio)
+sai generate sd3 \
+  --prompt "the same castle at golden hour" \
+  --image ./castle.png \
+  --strength 0.7 \
+  --cfg-scale 5
 ```
 
 ### Upscale Commands

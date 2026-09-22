@@ -103,8 +103,11 @@ export interface ModelConstraint {
   seed?: RangeConstraint;
   strength?: RangeConstraint;
   creativity?: RangeConstraint;
+  cfg_scale?: RangeConstraint;
   models?: string[];
   stylePresets?: string[];
+  /** SD3.5: `aspect_ratio` is rejected in image-to-image mode. */
+  imageToImageForbidsAspectRatio?: boolean;
 }
 
 /**
@@ -188,10 +191,12 @@ export interface BaseGenerationParams {
  * Parameters for Stable Image Ultra generation.
  */
 export interface UltraParams extends BaseGenerationParams {
-  /** Input image for image-to-image (file path or URL) */
+  /** Input image for image-to-image (file path or URL). Requires `strength`. */
   image?: string;
-  /** Strength for image-to-image (0-1) */
+  /** Image-to-image strength (0-1): 0 keeps the input, 1 ignores it. Requires `image`. */
   strength?: number;
+  /** Style preset (photographic, anime, etc.) — not sent before 1.0 */
+  style_preset?: string;
 }
 
 /**
@@ -206,8 +211,27 @@ export interface CoreParams extends BaseGenerationParams {
  * Parameters for SD3 generation.
  */
 export interface SD3Params extends BaseGenerationParams {
-  /** Model variant: sd3.5-large, sd3.5-medium, sd3.5-large-turbo */
+  /**
+   * Model variant: sd3.5-large (server default), sd3.5-large-turbo,
+   * sd3.5-medium, sd3.5-flash.
+   */
   model?: string;
+  /**
+   * Input image. Setting it makes the request image-to-image: `mode` is sent
+   * as `image-to-image`, `strength` is required and `aspect_ratio` must be
+   * omitted (the output keeps the input's shape). There is no `mode`
+   * parameter — it is derived from this field.
+   */
+  image?: string;
+  /**
+   * Image-to-image strength (0-1): 0 keeps the input, 1 ignores it. Requires
+   * `image`. For sd3.5-flash the API suggests 0.94-0.97.
+   */
+  strength?: number;
+  /** Prompt adherence (1-10). Server default 4 for Large/Medium, 1 for Turbo/Flash. */
+  cfg_scale?: number;
+  /** Style preset (photographic, anime, etc.) */
+  style_preset?: string;
 }
 
 // ==================== UPSCALE PARAMETER TYPES ====================
