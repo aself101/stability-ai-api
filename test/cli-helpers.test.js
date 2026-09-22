@@ -71,10 +71,12 @@ describe('buildUpscaleParams', () => {
     expect(buildUpscaleParams('upscale-creative', opts)).toMatchObject({ creativity: 0.3, style_preset: 'photographic' });
   });
 
-  it('fast carries neither, and defaults output_format to png', () => {
-    const p = buildUpscaleParams('upscale-fast', { image: 'x.png', outputFormat: '' });
+  it('fast carries neither creativity nor style_preset, and forces no output_format', () => {
+    // The CLI sets only what the user passed; the server's own default (png)
+    // applies otherwise. (0.4.0 and early 1.0 hard-coded CLI defaults.)
+    const p = buildUpscaleParams('upscale-fast', { image: 'x.png' });
     expect(p).not.toHaveProperty('creativity');
-    expect(p.output_format).toBe('png');
+    expect(p.output_format).toBeUndefined();
   });
 });
 
@@ -185,6 +187,29 @@ describe('saveImageResult', () => {
     expect(readdirSync(join(dir, 'sd3'))).toHaveLength(2);
   });
 
+  it('saves a CONTENT_FILTERED result but flags it: warning and exit code 3', async () => {
+    const saved = process.exitCode;
+    try {
+      const out = await saveImageResult({ image: PNG_BYTES, finish_reason: 'CONTENT_FILTERED' }, 'p', 'sd3', {}, dir);
+      expect(out.contentFiltered).toBe(true);
+      expect(readFileSync(out.imagePath).equals(PNG_BYTES)).toBe(true);
+      expect(process.exitCode).toBe(3);
+    } finally {
+      process.exitCode = saved;
+    }
+  });
+
+  it('a SUCCESS result leaves the exit code alone', async () => {
+    const saved = process.exitCode;
+    try {
+      const out = await saveImageResult({ image: PNG_BYTES, finish_reason: 'SUCCESS' }, 'p', 'sd3', {}, dir);
+      expect(out.contentFiltered).toBe(false);
+      expect(process.exitCode).toBe(saved);
+    } finally {
+      process.exitCode = saved;
+    }
+  });
+
   it('uses .png when no output_format was requested (the server default)', async () => {
     const { imagePath } = await saveImageResult({ image: PNG_BYTES }, 'p', 'stable-image-core', { prompt: 'p' }, dir);
     expect(imagePath).toMatch(/\.png$/);
@@ -226,5 +251,30 @@ describe('numeric option parsers under commander', () => {
   it('the 0.4.0 bug, for the record: bare parseInt takes the default as its radix', () => {
     expect(parse(parseInt, 5, ['--n', '10'])).toBe(5);
     expect(Number.isNaN(parse(parseInt, 5, ['--n', '7']))).toBe(true);
+  });
+});
+
+// The CLI forwards only what the user typed (DECISIONS #2). Every commander
+// default used to duplicate a server default, and would have silently gone
+// stale if Stability changed one (found by the ship pipeline's anxiety-reader).
+describe('the CLI declares no option defaults', () => {
+  it('no option in src/cli.ts has a default value except --log-level and the variadic --prompt', async () => {
+    const { readFileSync } = await import('fs');
+    const src = readFileSync(new URL('../src/cli.ts', import.meta.url), 'utf8');
+    // Each .option(...) call on one line: flag, description, then optional
+    // parser and optional default. Strip the two quoted strings and look at
+    // what is left: only a *Option parser identifier is allowed.
+    const calls = [...src.matchAll(/\.(?:option|requiredOption)\((.*)\)\s*$/gm)].map(m => m[1]);
+    expect(calls.length).toBeGreaterThan(50);
+    const withDefaults = calls
+      .map(args => {
+        const flag = args.match(/^'([^']+)'/)?.[1] ?? args;
+        const rest = args.replace(/^'[^']*',\s*(?:'[^']*'|`[^`]*`)/, '');
+        const extras = rest.split(',').map(x => x.trim()).filter(x => x && !/^[A-Za-z]+Option$/.test(x));
+        return extras.length ? `${flag} = ${extras.join(', ')}` : null;
+      })
+      .filter(Boolean)
+      .filter(entry => !entry.startsWith('--log-level') && !entry.startsWith('-p, --prompt <text...>'));
+    expect(withDefaults).toEqual([]);
   });
 });

@@ -10,6 +10,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   StabilityAPI,
   StabilityResponseError,
+  StabilityTaskTimeoutError,
   StabilityHttpError,
   StabilityNetworkError,
   StabilityTimeoutError,
@@ -98,7 +99,8 @@ describe('async task responses', () => {
 describe('error mapping', () => {
   const cases = [
     [401, 'Authentication failed. Check your API key.'],
-    [403, 'Content moderation flagged your request.'],
+    [402, 'Payment required: check your Stability credit balance.'],
+    [403, 'Forbidden: flagged by content moderation, or not permitted for this key.'],
     [413, 'Request payload too large (max 10MB).'],
     [429, 'Rate limit exceeded. Please wait before retrying.'],
   ];
@@ -279,6 +281,37 @@ describe('waitForResult', () => {
 
     expect(Date.now() - started).toBeLessThan(2000);
     expect(error.message).toMatch(/Timeout waiting for task t/);
+  });
+
+  it('times out with StabilityTaskTimeoutError carrying the task id (the paid task may still finish)', async () => {
+    stubFetch(() => jsonResponse(202, { id: 'task-7', status: 'in-progress' }));
+
+    const error = await api.waitForResult('task-7', { ...opts, timeout: 0.2 }).catch(e => e);
+
+    expect(error).toBeInstanceOf(StabilityTaskTimeoutError);
+    expect(error.taskId).toBe('task-7');
+    expect(error.message).toContain('sai result task-7');
+  });
+
+  it.each([
+    [{ timeout: NaN }, 'timeout'],
+    [{ timeout: 0 }, 'timeout'],
+    [{ pollInterval: -1 }, 'pollInterval'],
+  ])('rejects %o before polling (NaN timeout used to poll forever)', async (bad, name) => {
+    const calls = stubFetch(() => imageResponse());
+    await expect(api.waitForResult('t', { ...opts, ...bad })).rejects.toThrow(new RegExp(name));
+    expect(calls).toHaveLength(0);
+  });
+
+  it('shows no spinner by default (library stdout is not ours); showSpinner turns it on', async () => {
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    stubFetch(() => imageResponse());
+
+    await api.waitForResult('t', { pollInterval: 0, timeout: 5 });
+    expect(write).not.toHaveBeenCalled();
+
+    await api.waitForResult('t', { pollInterval: 0, timeout: 5, showSpinner: true });
+    expect(write).toHaveBeenCalled();
   });
 
   it('throws a permanent error immediately', async () => {

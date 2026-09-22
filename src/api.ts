@@ -50,7 +50,9 @@ export { StabilityHttpError, StabilityNetworkError, StabilityTimeoutError } from
  * for them this is a time-to-first-byte budget. 0.4.0 used 30 s (a total
  * timeout under axios), and Ultra image-to-image exceeded it in the 1.0 live
  * battery (2026-09-22) — the client gave up on a request the server may still
- * have completed and billed. 180 s covers the slowest synchronous endpoints
+ * have completed. (That one timed-out run turned out not to be billed —
+ * LIVE-BATTERY finding 3 — but one observation does not establish the server
+ * never bills a request the client abandoned.) 180 s covers the slowest synchronous endpoints
  * with margin; async endpoints (creative upscale, replace-background) return a
  * task id immediately and are unaffected.
  */
@@ -93,6 +95,24 @@ export class StabilityResponseError extends Error {
     super(message);
     this.name = 'StabilityResponseError';
     this.body = body;
+  }
+}
+
+/**
+ * `waitForResult` ran out of time. The task may still finish — and be billed —
+ * on the server; `taskId` is here so it can be resumed with
+ * `api.waitForResult(taskId)` or `sai result <taskId>`. Until 1.0 this was a
+ * plain Error with the id only in its message.
+ */
+export class StabilityTaskTimeoutError extends Error {
+  readonly taskId: string;
+  readonly timeoutSeconds: number;
+
+  constructor(taskId: string, timeoutSeconds: number) {
+    super(`Timeout waiting for task ${taskId} after ${timeoutSeconds} seconds (resume with waitForResult('${taskId}') or \`sai result ${taskId}\`)`);
+    this.name = 'StabilityTaskTimeoutError';
+    this.taskId = taskId;
+    this.timeoutSeconds = timeoutSeconds;
   }
 }
 
@@ -220,8 +240,15 @@ export class StabilityAPI {
     let message: string;
     if (status === 401) {
       message = 'Authentication failed. Check your API key.';
+    } else if (status === 402) {
+      // HTTP 402 Payment Required. [VERIFY] that Stability uses it for an empty
+      // balance; mapped so an out-of-credits account is not reported as a
+      // generic failure under NODE_ENV=production.
+      message = 'Payment required: check your Stability credit balance.';
     } else if (status === 403) {
-      message = 'Content moderation flagged your request.';
+      // Usually content moderation, but a 403 can also be an access/permission
+      // refusal; the server's own reason is on error.body.
+      message = 'Forbidden: flagged by content moderation, or not permitted for this key.';
     } else if (status === 413) {
       message = 'Request payload too large (max 10MB).';
     } else if (status === 429) {
@@ -260,7 +287,7 @@ export class StabilityAPI {
     method: 'GET' | 'POST',
     endpoint: string,
     formData: FormData | null = null,
-    options: { headers?: Record<string, string> } = {}
+    options: { headers?: Record<string, string>; timeoutMs?: number } = {}
   ): Promise<ImageResult | TaskResult | Record<string, unknown>> {
     this._verifyApiKey();
 
@@ -281,7 +308,7 @@ export class StabilityAPI {
         method,
         headers,
         ...(formData && method === 'POST' ? { form: formData } : {}),
-        timeoutMs: API_TIMEOUT_MS,
+        timeoutMs: options.timeoutMs ?? API_TIMEOUT_MS,
         // The API does not redirect; refusing keeps the API key on api.stability.ai.
         maxRedirects: 0,
       });
@@ -379,7 +406,8 @@ export class StabilityAPI {
     path: string,
     values: object,
     files: Record<string, string | Buffer | undefined>,
-    wait: boolean | undefined
+    wait: boolean | undefined,
+    poll?: WaitResultOptions
   ): Promise<ImageResult | TaskResult> {
     const result = await this._submit(path, values, files);
     if (isImageResult(result)) return result;
@@ -388,7 +416,7 @@ export class StabilityAPI {
     }
     if (wait === false) return result;
     logger.info(`Got task ID: ${result.id}, waiting for result...`);
-    return await this.waitForResult(result.id);
+    return await this.waitForResult(result.id, poll);
   }
 
   /**
@@ -401,9 +429,16 @@ export class StabilityAPI {
   async waitForResult(taskId: string, {
     pollInterval = DEFAULT_POLL_INTERVAL,
     timeout = DEFAULT_TIMEOUT,
-    showSpinner = true,
+    // Off by default: a library caller's stdout is not ours. The CLI turns it on.
+    showSpinner = false,
     maxRetries = MAX_RETRIES
   }: WaitResultOptions = {}): Promise<ImageResult> {
+    if (!Number.isFinite(timeout) || timeout <= 0) {
+      throw new RangeError(`waitForResult: timeout must be a positive number of seconds, got ${timeout}`);
+    }
+    if (!Number.isFinite(pollInterval) || pollInterval < 0) {
+      throw new RangeError(`waitForResult: pollInterval must be a non-negative number of seconds, got ${pollInterval}`);
+    }
     logger.info(`Polling for task ${taskId} (interval: ${pollInterval}s, timeout: ${timeout}s)`);
 
     const startTime = Date.now();
@@ -414,7 +449,7 @@ export class StabilityAPI {
     let spinner: ReturnType<typeof createSpinner> | null = null;
 
     if (showSpinner) {
-      spinner = createSpinner(`Waiting for upscale to complete (task: ${taskId})`);
+      spinner = createSpinner(`Waiting for task ${taskId}`);
       spinner.start();
     }
 
@@ -427,12 +462,15 @@ export class StabilityAPI {
         logger.debug(`Polling attempt ${attempt} (elapsed: ${elapsed.toFixed(1)}s)`);
 
         try {
-          const result = await this.getResult(taskId);
+          // Bound each poll by the time left, not the 180 s submit budget:
+          // one stalled poll could otherwise overrun `timeout` by minutes.
+          const remainingForPoll = Math.max(1, timeoutMs - (Date.now() - startTime));
+          const result = await this._fetchResult(taskId, Math.min(API_TIMEOUT_MS, remainingForPoll));
 
           // Check if task is complete (HTTP 200 with image)
           if (isImageResult(result)) {
             if (spinner) {
-              spinner.stop(`✓ Upscale complete! (${elapsed.toFixed(1)}s)`);
+              spinner.stop(`✓ Task complete (${elapsed.toFixed(1)}s)`);
             }
             logger.info(`Task ${taskId} completed after ${elapsed.toFixed(1)}s`);
             return result;
@@ -454,6 +492,8 @@ export class StabilityAPI {
           // Permanent errors throw immediately; transient ones retry up to
           // maxRetries in a row, waiting at least as long as Retry-After asks.
           if (!isTransientError(error) || ++consecutiveFailures > maxRetries) {
+            // The paid task may still complete server-side; say how to get it back.
+            logger.warn(`Stopped polling task ${taskId}; it may still complete. Resume with waitForResult('${taskId}') or \`sai result ${taskId}\`.`);
             throw error;
           }
           const retryAfter = error instanceof StabilityHttpError ? error.retryAfter : undefined;
@@ -466,7 +506,7 @@ export class StabilityAPI {
 
         // Check timeout
         if ((Date.now() - startTime) >= timeoutMs) {
-          throw new Error(`Timeout waiting for task ${taskId} after ${timeout} seconds`);
+          throw new StabilityTaskTimeoutError(taskId, timeout);
         }
 
         // Wait before next poll — never past the overall timeout. A large
@@ -489,10 +529,16 @@ export class StabilityAPI {
    * @returns Task result
    */
   async getResult(taskId: string): Promise<ImageResult | TaskResult | Record<string, unknown>> {
+    return await this._fetchResult(taskId, API_TIMEOUT_MS);
+  }
+
+  /** One results poll with an explicit idle timeout (see waitForResult). */
+  private async _fetchResult(taskId: string, timeoutMs: number): Promise<ImageResult | TaskResult | Record<string, unknown>> {
     const endpoint = `${MODEL_ENDPOINTS.results}/${taskId}`;
     // Results endpoint requires accept: */* for binary response
     return await this._makeFormDataRequest('GET', endpoint, null, {
-      headers: { 'accept': '*/*' }
+      headers: { 'accept': '*/*' },
+      timeoutMs,
     });
   }
 
@@ -595,7 +641,7 @@ export class StabilityAPI {
     logger.info('Upscaling image with Creative Upscaler (async)');
 
     requirePrompt(params?.prompt, 'Creative upscale');
-    return await this._submitTask(MODEL_ENDPOINTS['upscale-creative'], params, { image: imagePath }, params.wait);
+    return await this._submitTask(MODEL_ENDPOINTS['upscale-creative'], params, { image: imagePath }, params.wait, params.poll);
   }
 
   /**
@@ -777,7 +823,7 @@ export class StabilityAPI {
       subject_image: subjectImage,
       background_reference: options.background_reference,
       light_reference: options.light_reference,
-    }, options.wait);
+    }, options.wait, options.poll);
   }
 
   // ==================== Control Methods ====================

@@ -20,7 +20,7 @@ export interface GenerateOptions {
   aspectRatio?: string;
   cfgScale?: number;
   seed?: number;
-  outputFormat: string;
+  outputFormat?: string;
   image?: string;
   strength?: number;
   stylePreset?: string;
@@ -32,7 +32,7 @@ export interface UpscaleOptions {
   prompt?: string;
   negativePrompt?: string;
   seed?: number;
-  outputFormat: string;
+  outputFormat?: string;
   creativity?: number;
   stylePreset?: string;
 }
@@ -44,7 +44,7 @@ export interface EditOptions {
   negativePrompt?: string;
   growMask?: number;
   seed?: number;
-  outputFormat: string;
+  outputFormat?: string;
   stylePreset?: string;
   search?: string;
   select?: string;
@@ -77,7 +77,7 @@ export interface ControlOptions {
   compositionFidelity?: number;
   changeStrength?: number;
   seed?: number;
-  outputFormat: string;
+  outputFormat?: string;
   stylePreset?: string;
 }
 
@@ -156,7 +156,7 @@ export function buildUpscaleParams(model: string, options: UpscaleOptions): Upsc
     prompt: options.prompt ?? '',
     negative_prompt: options.negativePrompt,
     seed: options.seed,
-    output_format: options.outputFormat || 'png',
+    output_format: options.outputFormat,
   };
   if (model === 'upscale-conservative' || model === 'upscale-creative') {
     params.creativity = options.creativity;
@@ -172,7 +172,7 @@ export function buildUpscaleParams(model: string, options: UpscaleOptions): Upsc
  */
 export function buildEditParams(operation: string, options: EditOptions): Record<string, unknown> {
   const params: Record<string, unknown> = {
-    output_format: options.outputFormat || 'png'
+    output_format: options.outputFormat
   };
 
   // Common options
@@ -241,7 +241,7 @@ export function buildEditParams(operation: string, options: EditOptions): Record
  */
 export function buildControlParams(operation: string, options: ControlOptions): Record<string, unknown> {
   const params: Record<string, unknown> = {
-    output_format: options.outputFormat || 'png'
+    output_format: options.outputFormat
   };
 
   // Common options
@@ -284,7 +284,12 @@ function outputFormatOf(params: object): string | undefined {
  * `<outputDir or default>/<model>/`. The file extension follows the requested
  * output_format (png when none was set, which is also the server default).
  *
- * @returns the image and metadata paths written
+ * A result whose `finish_reason` is CONTENT_FILTERED is still saved (it was
+ * billed), but warned about and flagged with `process.exitCode = 3`, so a
+ * batch script can tell "done" from "done, but blurred". Until 1.0 the CLI
+ * printed ✓ and exited 0; only the metadata JSON recorded it.
+ *
+ * @returns the paths written, and whether the output was content-filtered
  */
 export async function saveImageResult(
   result: ImageResult,
@@ -292,7 +297,7 @@ export async function saveImageResult(
   model: string,
   params: object,
   outputDir?: string
-): Promise<{ imagePath: string; metadataPath: string }> {
+): Promise<{ imagePath: string; metadataPath: string; contentFiltered: boolean }> {
   const modelDir = path.join(outputDir || getOutputDir(), model);
   await ensureDirectory(modelDir);
 
@@ -317,5 +322,11 @@ export async function saveImageResult(
   await writeToFile(metadata, metadataPath);
   logger.info(`✓ Metadata saved: ${metadataPath}`);
 
-  return { imagePath, metadataPath };
+  const contentFiltered = result.finish_reason === 'CONTENT_FILTERED';
+  if (contentFiltered) {
+    logger.warn(`⚠ Output was blurred by Stability's content filter (finish-reason CONTENT_FILTERED; the request was still billed): ${imagePath}`);
+    process.exitCode = 3;
+  }
+
+  return { imagePath, metadataPath, contentFiltered };
 }

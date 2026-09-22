@@ -259,6 +259,8 @@ export interface UpscaleParams {
   creativity?: number;
   /** Style preset — creative upscale only (not sent before 1.0) */
   style_preset?: string;
+  /** Creative upscale: polling options (timeout, interval, spinner, retries) when `wait` is not false */
+  poll?: WaitResultOptions;
   /** Wait for async result */
   wait?: boolean;
 }
@@ -391,6 +393,8 @@ export interface ReplaceBackgroundParams {
   output_format?: string;
   /** Wait for async result */
   wait?: boolean;
+  /** Polling options (timeout, interval, spinner, retries) when `wait` is not false */
+  poll?: WaitResultOptions;
 }
 
 // ==================== CONTROL PARAMETER TYPES ====================

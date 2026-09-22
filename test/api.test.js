@@ -198,6 +198,21 @@ describe('async endpoints: submit, then poll', () => {
   });
 });
 
+describe('async methods pass poll options through', () => {
+  it('upscaleCreative honours poll.timeout (the 300 s default could not be changed before 1.0)', async () => {
+    stubFetch((url) => url.endsWith('/upscale/creative')
+      ? jsonResponse(200, { id: 'task-5' })
+      : jsonResponse(202, { id: 'task-5', status: 'in-progress' }));
+
+    const started = Date.now();
+    const error = await api.upscaleCreative(png, { prompt: 'p', poll: { timeout: 0.2, pollInterval: 0 } }).catch(e => e);
+
+    expect(error.name).toBe('StabilityTaskTimeoutError');
+    expect(error.taskId).toBe('task-5');
+    expect(Date.now() - started).toBeLessThan(3000);
+  });
+});
+
 describe('synchronous endpoints return the image and its metadata', () => {
   it.each([
     ['generateUltra', (a) => a.generateUltra({ prompt: 'p' })],

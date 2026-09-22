@@ -117,7 +117,8 @@ async function loadSpec(): Promise<Json> {
   if (snapshotPath) {
     return JSON.parse(readFileSync(snapshotPath, 'utf8')) as Json;
   }
-  const res = await fetch(SPEC_URL);
+  // Bounded: a slow upstream must fail CI, not hang it.
+  const res = await fetch(SPEC_URL, { signal: AbortSignal.timeout(30_000) });
   if (!res.ok) throw new Error(`GET ${SPEC_URL} → ${res.status}`);
   const spec = (await res.json()) as Json;
   if (savePath) {

@@ -40,8 +40,10 @@ const BINARY_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif']);
 export const MAX_REDIRECTS = 5;
 
 // Configure module logger
+// Library default is 'warn': a server importing the SDK should not get info
+// lines (which include prompts) on stdout. The CLI sets 'info' (--log-level).
 const logger = winston.createLogger({
-  level: 'info',
+  level: 'warn',
   format: winston.format.combine(
     winston.format.timestamp(),
     winston.format.printf(({ timestamp, level, message }) => {
@@ -84,14 +86,56 @@ export function errorCode(value: unknown): string | undefined {
  * @param ip - IP address to check
  * @returns True if IP is blocked
  */
+/**
+ * Expand an IPv6 address to its 8 hextets (numbers), accepting a trailing
+ * dotted-quad. Returns null if it is not a well-formed IPv6 literal.
+ */
+function expandIPv6(ip: string): number[] | null {
+  if (!isIPv6(ip)) return null;
+  let text = ip;
+  const dotted = text.match(/(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (dotted) {
+    const [a, b, c, d] = dotted.slice(1).map(Number);
+    text = text.slice(0, dotted.index) + ((a << 8) | b).toString(16) + ':' + ((c << 8) | d).toString(16);
+  }
+  const [head, tail] = text.split('::');
+  const parse = (part: string | undefined) => (part ? part.split(':').map(h => parseInt(h, 16)) : []);
+  const left = parse(head);
+  const right = parse(tail);
+  const fill = tail === undefined ? [] : new Array(8 - left.length - right.length).fill(0);
+  const hextets = [...left, ...fill, ...right];
+  return hextets.length === 8 ? hextets : null;
+}
+
+/**
+ * The IPv4 address an IPv6 address embeds and routes to, if any: IPv4-mapped
+ * (::ffff:0:0/96), IPv4-translated (::ffff:0:0:0/96), NAT64 (64:ff9b::/96) and
+ * the deprecated IPv4-compatible form (::/96, excluding :: and ::1).
+ *
+ * Until 1.0 only the *dotted* mapped form was recognised. Node's URL parser
+ * normalises https://[::ffff:127.0.0.1] to [::ffff:7f00:1], so the hex form —
+ * the one validateImageUrl actually sees after parsing — bypassed the check.
+ */
+function embeddedIPv4(ip: string): string | null {
+  const h = expandIPv6(ip);
+  if (!h) return null;
+  const zero = (from: number, to: number) => h.slice(from, to).every(x => x === 0);
+  const isMapped = zero(0, 5) && h[5] === 0xffff;
+  const isTranslated = zero(0, 4) && h[4] === 0xffff && h[5] === 0;
+  const isNat64 = h[0] === 0x64 && h[1] === 0xff9b && zero(2, 6);
+  const isCompatible = zero(0, 6) && (h[6] !== 0 || h[7] > 1);
+  if (!(isMapped || isTranslated || isNat64 || isCompatible)) return null;
+  return [h[6] >> 8, h[6] & 0xff, h[7] >> 8, h[7] & 0xff].join('.');
+}
+
 function isBlockedIP(ip: string): boolean {
   const cleanIP = ip.replace(/^\[|\]$/g, '').toLowerCase(); // Remove IPv6 brackets
 
-  // IPv4-mapped IPv6 (::ffff:10.0.0.1) — judge the embedded IPv4. DNS can
-  // return this form, and it bypasses every IPv4 pattern below otherwise.
-  const mapped = cleanIP.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  if (mapped) {
-    return isBlockedIP(mapped[1]);
+  // An IPv6 address that embeds an IPv4 one is judged by that IPv4 — in any
+  // spelling (dotted or hex), and whether it came from a URL or from DNS.
+  const v4 = embeddedIPv4(cleanIP);
+  if (v4) {
+    return isBlockedIP(v4);
   }
 
   // Block localhost variations
@@ -116,7 +160,12 @@ function isBlockedIP(ip: string): boolean {
     /^172\.(1[6-9]|2[0-9]|3[0-1])\./, // Private Class B
     /^192\.168\./,               // Private Class C
     /^169\.254\./,               // Link-local (AWS metadata)
-    /^0\./,                      // Invalid range
+    /^0\./,                      // "This network" (0.0.0.0/8)
+    /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./, // Carrier-grade NAT (100.64.0.0/10)
+    /^192\.0\.0\./,              // IETF protocol assignments (192.0.0.0/24)
+    /^198\.1[89]\./,             // Benchmarking (198.18.0.0/15)
+    /^(22[4-9]|2[3-5]\d)\./,      // Multicast and reserved (224.0.0.0/3)
+    /^ff[0-9a-f]{2}:/,           // IPv6 multicast (ff00::/8)
     /^::1?$/,                    // IPv6 loopback / unspecified
     // fe80::/10 and fc00::/7 are prefix *ranges*, not literals. Until 1.0 these
     // were /^fe80:/, /^fc00:/, /^fd00:/, which passed fd12:3456::1 and every

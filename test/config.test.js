@@ -1034,3 +1034,40 @@ describe('range checks reject non-finite numbers', () => {
     expect(run().valid).toBe(false);
   });
 });
+
+// Importing the library must not read .env files (it did on import until 1.0,
+// so a server importing the SDK picked up the working directory's and the
+// user's ~/.stability key). Run in a child process from a directory holding a
+// .env, with HOME pointed at an empty directory.
+describe('importing the library has no .env side effect', () => {
+  it('does not load ./.env on import; loadEnvFiles() does', async () => {
+    const { mkdtempSync, writeFileSync, rmSync } = await import('fs');
+    const { tmpdir } = await import('os');
+    const { join } = await import('path');
+    const { spawnSync } = await import('child_process');
+    const { pathToFileURL } = await import('url');
+    const cwd = mkdtempSync(join(tmpdir(), 'sai-env-'));
+    const home = mkdtempSync(join(tmpdir(), 'sai-home-'));
+    try {
+      writeFileSync(join(cwd, '.env'), 'STABILITY_API_KEY=sk-from-dotenv-file\n');
+      const config = pathToFileURL(join(process.cwd(), 'src/config.ts')).href;
+      // The child runs in a temp dir with no node_modules, so load tsx by path.
+      const tsx = pathToFileURL(join(process.cwd(), 'node_modules/tsx/dist/loader.mjs')).href;
+      const run = (code) => spawnSync(process.execPath, ['--import', tsx, '--input-type=module', '-e', code], {
+        cwd,
+        env: { PATH: process.env.PATH, HOME: home },
+        encoding: 'utf8',
+      });
+
+      const onImport = run(`await import(${JSON.stringify(config)}); console.log(process.env.STABILITY_API_KEY ?? 'unset');`);
+      expect(onImport.stderr).toBe('');
+      expect(onImport.stdout.trim()).toBe('unset');
+
+      const explicit = run(`const c = await import(${JSON.stringify(config)}); c.loadEnvFiles(); console.log(process.env.STABILITY_API_KEY ?? 'unset');`);
+      expect(explicit.stdout.trim()).toBe('sk-from-dotenv-file');
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
+    }
+  }, 20000);
+});

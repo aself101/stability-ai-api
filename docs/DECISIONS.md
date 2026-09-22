@@ -152,7 +152,7 @@ each hop (#10).
 `axios` and `form-data` are gone. Runtime dependencies are `commander`, `dotenv` and
 `winston`. Node 22 is required, the same as bfl.
 
-## 10. SSRF: every hop, every address, every range
+## 10. SSRF: every hop, every address, every embedded form
 
 `validateImageUrl` is shared with bfl-api and had the same three gaps there:
 
@@ -172,6 +172,13 @@ check at all.
 
 Items 2 and 3 **are not yet fixed in bfl-api**. Its `isBlockedIP` and `validateImageUrl`
 are the same code; carry this over.
+
+4. **(ship run #2)** Node's URL parser rewrites `https://[::ffff:127.0.0.1]` to
+   `[::ffff:7f00:1]`, and only the dotted mapped form was recognised, so the hex
+   form of loopback passed both checks. IPv6 addresses are now expanded and any
+   embedded IPv4 — mapped, translated, NAT64 (`64:ff9b::/96`), IPv4-compatible —
+   is judged as that IPv4. 100.64/10, 198.18/15, 192.0.0/24, 224/3 and ff00::/8
+   were added to the blocklist.
 
 **Still open**, as in bfl: DNS rebinding. Validation resolves, then fetch resolves
 again independently, which leaves a time-of-check/time-of-use window. Closing it needs
@@ -289,4 +296,43 @@ typed with the SDK's own parameter types (removing the
 `params as unknown as Parameters<...>` casts), and are unit-tested. That test is
 how the webp corruption in `writeToFile` (CHANGELOG, Fixed) was found. `cli.ts`
 itself (argument parsing, spinners, exit codes) stays excluded from coverage.
+
+## 19. The library has no host-process side effects; the CLI does
+
+Importing the package reads no files and writes nothing to stdout by default:
+- `.env` loading moved from `config.ts` import time to `loadEnvFiles()`, which the
+  CLI calls at startup and a library user may call explicitly;
+- the shared logger defaults to `warn` (the CLI sets `info`);
+- `waitForResult`'s spinner defaults off (the CLI passes `showSpinner: true`).
+
+**Why:** found by the ship pipeline's anxiety-reader (run #2). A server importing
+the SDK silently loaded the working directory's `.env` and `~/.stability/.env`,
+and `new StabilityAPI()` then fell back to that key — it could bill a key a
+developer left in their home directory. Info lines include prompts, and the async
+path forced an 80 ms ANSI spinner onto the host's stdout for up to 5 minutes.
+Alex chose CLI-only side effects over documenting them (2026-09-22).
+
+**Breaks if:** a library user relied on the implicit `.env` loading — the fix is
+one `loadEnvFiles()` call, recorded in the CHANGELOG as breaking.
+
+## 20. A content-filtered result is a success with a warning, not an error
+
+Stability answers a filtered request with 200, a blurred image, and
+`finish-reason: CONTENT_FILTERED` — and bills it. The library returns it like any
+image (the caller checks `result.finish_reason`); the CLI saves it, warns, and
+exits with code 3 so batch scripts can tell "done" from "done but blurred".
+
+**Why:** the ship pipeline's anxiety-reader (F1). Throwing from the SDK would
+turn a paid 200 into an exception for every consumer; exiting 0 with a ✓ hid it
+from scripts. Alex chose the CLI exit code (2026-09-22).
+
+## 21. Known gaps recorded rather than fixed in 1.0
+
+- **The drift check covers requests, not responses.** Content types, the
+  `finish-reason`/`seed` headers, the 202 `{ id }` body and the results endpoint's
+  bytes have no guard; a change there shows up at runtime, after billing. The
+  response-shape guards (#16) make it loud rather than silent.
+- **DNS rebinding** (#10): validation and download resolve separately.
+- **402 semantics** are mapped by HTTP convention; not confirmed that Stability uses
+  402 for an empty balance.
 

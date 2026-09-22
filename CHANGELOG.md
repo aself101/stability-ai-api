@@ -14,6 +14,25 @@ the reasoning behind each change is in `docs/DECISIONS.md`.
 
 ### Changed
 
+- **BREAKING — the library has no host-process side effects.** Importing the package no
+  longer loads `./.env` and `~/.stability/.env` into `process.env` (it did on import, so
+  a server importing the SDK could silently pick up — and bill — a key left in a home
+  directory). The `sai` CLI still loads both; library users call `loadEnvFiles()` from
+  `stability-ai-api/config` to opt in. The shared logger now defaults to `warn` (the CLI
+  sets `info`), and `waitForResult` draws no spinner unless `showSpinner: true` (the CLI
+  turns it on). Found by the ship pipeline's anxiety-reader.
+- The CLI no longer sets option defaults: every one (`--aspect-ratio 1:1`,
+  `--output-format png`, `--grow-mask 5`/`3`, `--control-strength 0.7`, …) duplicated the
+  server's own default and would have gone stale silently if Stability changed one.
+  Only what you type is sent; `--help` names each server default. (Outpaint
+  `--creativity` defaulted to 0.5 where the spec states no default; the server now
+  decides.)
+- A 402 reads "Payment required: check your Stability credit balance" (it was a generic
+  message under `NODE_ENV=production`), and a 403 no longer claims to be moderation
+  specifically ("flagged by content moderation, or not permitted for this key").
+- `prepublishOnly` runs the drift check against the committed snapshot (plus build and
+  tests), so an unrelated upstream spec addition cannot block an emergency publish; CI
+  still checks the live spec, now with a 30 s fetch timeout.
 - **BREAKING — requires Node.js 22.** The HTTP layer is native `fetch` (`src/http.ts`,
   ported from bfl-api 2.0.1). `axios` and `form-data` are no longer dependencies;
   multipart bodies are native `FormData` with typed `Blob` parts.
@@ -56,6 +75,16 @@ the reasoning behind each change is in `docs/DECISIONS.md`.
 
 ### Added
 
+- `sai result <taskId>` resumes an async task (creative upscale, replace-background) whose
+  polling timed out or failed, and saves its image. The task may still complete — and be
+  billed — on the server; before 1.0 its id appeared only in a log line.
+- `StabilityTaskTimeoutError` (`taskId`, `timeoutSeconds`) from `waitForResult`, and a
+  `poll` option (`WaitResultOptions`) on `upscaleCreative` / `replaceBackgroundAndRelight`
+  so SDK callers can set the timeout, interval, spinner and retries.
+- CLI exit code **3** when an output was blurred by the content filter
+  (`finish_reason: CONTENT_FILTERED`): the file is saved (it was billed) and a warning
+  printed. Before, the CLI printed ✓ and exited 0.
+- `loadEnvFiles()` (`stability-ai-api/config`).
 - `new StabilityAPI()` with no arguments uses `STABILITY_API_KEY`, and
   `new StabilityAPI({ apiKey, baseUrl, logLevel })` takes the `StabilityApiOptions`
   object (the type was exported in 0.4.0 but the constructor ignored it). The positional
@@ -96,6 +125,16 @@ the reasoning behind each change is in `docs/DECISIONS.md`.
 
 ### Fixed
 
+- **Security — IPv6 addresses embedding an IPv4 address in hex form bypassed the SSRF
+  check.** Node's URL parser rewrites `https://[::ffff:127.0.0.1]` to
+  `[::ffff:7f00:1]`, and only the dotted form was recognised. IPv6 addresses are now
+  expanded and any embedded IPv4 — mapped, translated, NAT64 (`64:ff9b::/96`),
+  IPv4-compatible — is judged as that IPv4. Carrier-grade NAT (`100.64/10`),
+  `198.18/15`, `192.0.0/24`, multicast/reserved (`224/3`) and IPv6 multicast are blocked.
+  The README no longer claims DNS rebinding is prevented; it is a documented known gap.
+- `waitForResult` rejects a non-positive or NaN `timeout` and a negative `pollInterval`
+  (a NaN timeout polled forever), and each poll's request is bounded by the time left
+  (one stalled poll could overrun `timeout` by the 180 s request budget).
 - **`--grow-mask` sent the wrong number.** Commander calls an option parser as
   `parser(value, default)`, and the CLI passed bare `parseInt`, so the default became the
   radix: with default 5, `--grow-mask 10` sent 5 and `--grow-mask 7` sent NaN (erase,

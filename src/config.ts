@@ -4,10 +4,12 @@
  * Handles authentication and API configuration settings.
  *
  * API key can be provided via (in priority order):
- * 1. Command line flag: --api-key
+ * 1. Command line flag: --api-key (CLI)
  * 2. Environment variable: STABILITY_API_KEY
- * 3. Local .env file in current directory
- * 4. Global config: ~/.stability/.env (for global npm installs)
+ * 3. Local .env file in current directory (CLI, or after `loadEnvFiles()`)
+ * 4. Global config: ~/.stability/.env (CLI, or after `loadEnvFiles()`)
+ *
+ * The library itself never reads files on import (see `loadEnvFiles`).
  *
  * To obtain an API key:
  * 1. Visit https://platform.stability.ai/
@@ -30,14 +32,21 @@ import type {
   ValidationResult,
 } from './types/index.js';
 
-// Load environment variables in priority order:
-// 1. First try local .env in current directory
-dotenv.config();
-
-// 2. Then try global config in home directory (if local .env doesn't exist)
-const globalConfigPath = join(homedir(), '.stability', '.env');
-if (existsSync(globalConfigPath)) {
-  dotenv.config({ path: globalConfigPath });
+/**
+ * Load `.env` from the current directory, then `~/.stability/.env`, into
+ * `process.env` (existing variables win; dotenv never overwrites). The `sai`
+ * CLI calls this at startup. Library code does not: until 1.0 it ran on
+ * import, so any program importing the SDK silently read the working
+ * directory's `.env` and the user's home-directory key, and a
+ * `new StabilityAPI()` could bill whatever key was left there.
+ * Call it yourself if you want the CLI's behaviour.
+ */
+export function loadEnvFiles(): void {
+  dotenv.config();
+  const globalConfigPath = join(homedir(), '.stability', '.env');
+  if (existsSync(globalConfigPath)) {
+    dotenv.config({ path: globalConfigPath });
+  }
 }
 
 /** Stability AI REST API origin. Override per client with `new StabilityAPI({ baseUrl })` (HTTPS only). */

@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node.js Version](https://img.shields.io/node/v/stability-ai-api)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue.svg)](https://www.typescriptlang.org/)
-[![Tests](https://img.shields.io/badge/tests-445%20passing-brightgreen)](test/)
+[![Tests](https://img.shields.io/badge/tests-468%20passing-brightgreen)](test/)
 [![Coverage](https://img.shields.io/badge/coverage-93.1%25-brightgreen)](test/)
 
 A TypeScript/Node.js wrapper for the [Stability AI API](https://platform.stability.ai/docs/api-reference) that provides easy access to Stable Diffusion 3.5, image upscaling, editing, and control models. Generate stunning AI images, upscale, edit, and control them with professional quality through a simple command-line interface.
@@ -73,18 +73,18 @@ Full TypeScript support with exported types for all parameters and responses.
 The Stability AI API provides access to state-of-the-art image generation and upscaling models. This Node.js service implements:
 
 - **17 Endpoints** - 3 Generate + 3 Upscale + 7 Edit + 4 Control operations
-- **Production Security** - API key redaction, error sanitization, HTTPS enforcement, comprehensive SSRF protection (including IPv4-mapped IPv6 bypass prevention)
+- **Production Security** - API key redaction, error sanitization, HTTPS enforcement, SSRF checks on image URLs (every DNS answer and every redirect hop; one known gap — see SSRF Protection)
 - **DoS Prevention** - Request timeouts (180 s time-to-first-byte for API calls, 60 s idle for downloads), file size limits (50MB), redirect limits
 - **Parameter Validation** - Pre-flight validation catches invalid parameters before API calls
 - **API Key Authentication** - Multiple configuration methods with secure handling
-- **Auto-polling with Spinner** - Automatic result polling for async operations with progress indicator
+- **Auto-polling** - Async operations are polled to completion (a progress spinner in the CLI; opt-in for library use)
 - **Batch Processing** - Generate multiple images sequentially from multiple prompts
 - **Retry Logic** - Transient error handling with smart retry
 - **Image Input Support** - Convert local files to Buffers with validation
 - **Organized Storage** - Structured directories with timestamped files and metadata
 - **CLI Orchestration** - Command-line tool with subcommands for generation and upscaling
 - **Full TypeScript Support** - Complete type definitions for all API methods, parameters, and responses
-- **Comprehensive Testing** - 445 tests, 93.1% line coverage (api.ts 96.4%, cli-helpers.ts 95.4%, config.ts 94.3%, http.ts 91.2%, utils.ts 89.6%; measured 2026-09-22), no network access; a spec-drift check against the live API runs in CI
+- **Comprehensive Testing** - 468 tests, 93.1% line coverage (api.ts 96.4%, cli-helpers.ts 95.4%, config.ts 94.3%, http.ts 91.2%, utils.ts 89.6%; measured 2026-09-22), no network access; a spec-drift check against the live API runs in CI
 
 ### Endpoint Summary
 
@@ -405,7 +405,16 @@ Transfer the artistic style from one image to another image.
 
 ### 2. Configure Your API Key
 
-You can provide your API key in multiple ways (listed in priority order):
+The **CLI** finds your API key in any of these places (listed in priority order). The
+**library** reads only the `STABILITY_API_KEY` environment variable or a key you pass in —
+it never reads `.env` files on its own; call `loadEnvFiles()` from
+`stability-ai-api/config` if you want the CLI's behaviour:
+
+```typescript
+import { loadEnvFiles } from 'stability-ai-api/config';
+loadEnvFiles();                       // ./.env, then ~/.stability/.env (existing env wins)
+const api = new StabilityAPI();       // now sees STABILITY_API_KEY from those files
+```
 
 #### Option 1: CLI Flag (Highest Priority)
 ```bash
@@ -474,6 +483,7 @@ import {
   StabilityNetworkError,    // no response: code, retryable
   StabilityTimeoutError,    // no data within the timeout
   StabilityResponseError,   // 2xx with the wrong shape: body
+  StabilityTaskTimeoutError, // waitForResult ran out of time: taskId (resume it)
   isTransientError,         // the retry classifier waitForResult uses
   isImageResult,            // type guard: { image: Buffer, ... }
   isTaskResult,             // type guard: { id: string }
@@ -521,7 +531,8 @@ Two more entry points expose the tables and helpers the client and CLI are built
 | `ASPECT_RATIOS`, `OUTPUT_FORMATS`, `STYLE_PRESETS` | Accepted enum values |
 | `validateModelParams`, `validateEditParams`, `validateControlParams` | Validate a parameter object before sending; return `{ valid, errors }` |
 | `imageToImageErrors` | The Ultra/SD 3.5 image + strength + aspect-ratio rules |
-| `getStabilityApiKey`, `validateApiKeyFormat` | Key lookup (flag → env → `.env` → `~/.stability/.env`) and a format check |
+| `getStabilityApiKey`, `validateApiKeyFormat` | Key lookup (flag → `STABILITY_API_KEY`) and a format check |
+| `loadEnvFiles` | Load `./.env` then `~/.stability/.env` into `process.env` (what the CLI does at startup; the library never does it on its own) |
 | `BASE_URL`, `DEFAULT_POLL_INTERVAL`, `DEFAULT_TIMEOUT`, `MAX_RETRIES`, `getOutputDir`, `getPollInterval`, `getTimeout` | Defaults |
 
 ```typescript
@@ -573,7 +584,7 @@ import { StabilityAPI } from 'stability-ai-api';
 // If running from source
 import { StabilityAPI } from './src/api.js';
 
-// No arguments: uses STABILITY_API_KEY (environment, or a .env file)
+// No arguments: uses the STABILITY_API_KEY environment variable
 const api = new StabilityAPI();
 
 // Or pass the key, positionally or as an options object
@@ -764,12 +775,23 @@ const status = await api.getResult(taskId);
 
 // Or wait for completion with auto-polling
 const result = await api.waitForResult(taskId, {
-  timeout: 300,      // Max 5 minutes
+  timeout: 300,      // Max 5 minutes (throws StabilityTaskTimeoutError with .taskId)
   pollInterval: 2,   // Check every 2 seconds
   maxRetries: 3,     // Consecutive transient failures tolerated
-  showSpinner: true  // Show animated progress spinner
+  showSpinner: true  // Progress spinner on stdout (default false for library use)
+});
+
+// The async methods take the same options as `poll`
+const upscaled = await api.upscaleCreative('./photo.png', {
+  prompt: 'detailed photograph',
+  poll: { timeout: 600, pollInterval: 5 }
 });
 ```
+
+**Library defaults are quiet.** The shared logger defaults to `warn` (set
+`logLevel` or call `setLogLevel('info')` to see progress lines, which include your
+prompts), and no spinner is drawn unless `showSpinner: true` is passed. The CLI turns
+both on.
 
 ### Complete Example: Batch Generation
 
@@ -1027,6 +1049,23 @@ sai upscale creative \
   --creativity 0.35
 ```
 
+### Resume an Async Task
+
+```bash
+sai result <taskId> [--timeout 600]
+```
+
+Polls a creative-upscale or replace-background task whose polling timed out or failed
+(the id is printed with the error) and saves the image under `<output-dir>/results/`.
+
+### Exit Codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Success |
+| 1 | Error (validation, API or network failure) |
+| 3 | Completed, but at least one output was blurred by the content filter (`CONTENT_FILTERED`) |
+
 ### Check Credits
 
 ```bash
@@ -1263,13 +1302,12 @@ datasets/
 - Prevents man-in-the-middle attacks
 
 ### SSRF Protection
-- All image URLs validated before processing
-- Blocks localhost (`127.0.0.1`, `::1`, `localhost`)
-- Blocks private IP ranges (`10.x`, `192.168.x`, `172.16-31.x`, `169.254.x`)
-- Blocks cloud metadata endpoints (`169.254.169.254`, `metadata.google.internal`)
-- **IPv4-Mapped IPv6 Bypass Prevention**: Detects and blocks `[::ffff:127.0.0.1]`, etc.
-- **DNS Rebinding Prevention**: Performs DNS resolution to block domains that resolve to internal/private IPs (prevents TOCTOU attacks via wildcard DNS services like nip.io)
-- Only allows HTTPS URLs for remote images
+- All image URLs validated before download; HTTPS only
+- Blocks loopback, private (`10/8`, `172.16/12`, `192.168/16`), link-local and metadata (`169.254/16`, `metadata.google.internal`), carrier-grade NAT (`100.64/10`), benchmarking (`198.18/15`), `0/8`, `192.0.0/24`, multicast/reserved (`224/3`); IPv6 loopback, link-local (`fe80::/10`), unique-local (`fc00::/7`) and multicast (`ff00::/8`)
+- IPv6 addresses that embed an IPv4 address — mapped (`::ffff:…`, dotted or hex), translated, NAT64 (`64:ff9b::/96`), IPv4-compatible — are judged by the IPv4 they route to
+- Domain names are resolved and **every** returned address is checked (a name with one public and one private record is refused)
+- Every redirect hop is re-validated before it is followed
+- **Known gap — DNS rebinding:** validation resolves the name, then the download resolves it again independently. A name whose DNS answer changes between the two (a rebinding attack) can still reach an internal address. Closing this needs a pinned-IP connection (see docs/DECISIONS.md #10); treat image URLs from untrusted users accordingly
 
 ### DoS Prevention
 - Request timeout: 180 seconds without data for API calls (synchronous endpoints send nothing until the image is ready)
@@ -1372,6 +1410,14 @@ sai generate ultra --prompt "test" --log-level debug
 - Returns a task ID (202 from creative upscale, 200 JSON from replace-background)
 - Automatically polls for result
 - CLI spinner shows time elapsed and estimated remaining time
+- If polling times out or fails, the task may still complete (and is billed) on the
+  server: the error (`StabilityTaskTimeoutError`) carries `taskId`, and
+  `sai result <taskId>` resumes it
+
+**Content-filtered results.** When Stability's filter blurs an output, the request still
+succeeds (and is billed) with `finish_reason: 'CONTENT_FILTERED'` on the result. The
+library returns it like any image — check `result.finish_reason`. The CLI saves it,
+prints a ⚠ warning, and exits with code **3** so scripts can tell.
 
 ## API Response Patterns
 

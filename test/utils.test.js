@@ -279,6 +279,33 @@ describe('Image Validation (Security)', () => {
       }
     });
 
+    // The hex spellings are what validateImageUrl sees after new URL() parsing:
+    // https://[::ffff:127.0.0.1] becomes [::ffff:7f00:1]. Until 1.0 only the
+    // dotted form was recognised, so the hex form of loopback got through
+    // (found by the ship pipeline's anxiety-reader).
+    it.each([
+      ['https://[::ffff:7f00:1]/x.png', 'IPv4-mapped loopback, hex'],
+      ['https://[::ffff:a9fe:a9fe]/x.png', 'IPv4-mapped metadata, hex'],
+      ['https://[64:ff9b::a9fe:a9fe]/x.png', 'NAT64 metadata'],
+      ['https://[::ffff:0:a00:1]/x.png', 'IPv4-translated 10.0.0.1'],
+      ['https://[::7f00:1]/x.png', 'IPv4-compatible loopback'],
+      ['https://100.64.1.1/x.png', 'carrier-grade NAT'],
+      ['https://198.18.0.1/x.png', 'benchmarking range'],
+      ['https://[ff02::1]/x.png', 'IPv6 multicast'],
+    ])('blocks %s (%s)', async (url) => {
+      await expect(validateImageUrl(url)).rejects.toThrow(/internal|private|localhost/);
+    });
+
+    it.each(['https://100.128.0.1/x.png', 'https://[::ffff:5db8:d822]/x.png', 'https://[2606:4700::6810:84e5]/x.png'])(
+      'allows public %s', async (url) => {
+        await expect(validateImageUrl(url)).resolves.toBe(url);
+      });
+
+    it('judges a DNS answer in hex IPv4-mapped form by its IPv4', async () => {
+      lookup.mockResolvedValue([{ address: '::ffff:a00:1', family: 6 }]);
+      await expect(validateImageUrl('https://evil.example/x.png')).rejects.toThrow('resolves to internal/private IP');
+    });
+
     it('should handle DNS lookup failures gracefully', async () => {
       lookup.mockRejectedValue({ code: 'ENOTFOUND' });
       await expect(validateImageUrl('https://nonexistent.domain.invalid/image.jpg')).rejects.toThrow('could not be resolved');
