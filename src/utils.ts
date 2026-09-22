@@ -100,13 +100,6 @@ export function errorCode(value: unknown): string | undefined {
 }
 
 /**
- * Check if an IP address is blocked (private, localhost, or cloud metadata).
- * Used for DNS rebinding prevention.
- *
- * @param ip - IP address to check
- * @returns True if IP is blocked
- */
-/**
  * Expand an IPv6 address to its 8 hextets (numbers), accepting a trailing
  * dotted-quad. Returns null if it is not a well-formed IPv6 literal.
  */
@@ -148,6 +141,13 @@ function embeddedIPv4(ip: string): string | null {
   return [h[6] >> 8, h[6] & 0xff, h[7] >> 8, h[7] & 0xff].join('.');
 }
 
+/**
+ * Check if an IP address is blocked (private, localhost, or cloud metadata).
+ * Used for DNS rebinding prevention.
+ *
+ * @param ip - IP address to check
+ * @returns True if IP is blocked
+ */
 function isBlockedIP(ip: string): boolean {
   const cleanIP = ip.replace(/^\[|\]$/g, '').toLowerCase(); // Remove IPv6 brackets
 

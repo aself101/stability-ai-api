@@ -303,4 +303,7 @@ describe('parseLogLevel under commander', () => {
   it('rejects an unknown level', () => {
     expect(() => parse(['--log-level', 'loud'])).toThrow();
   });
+  it.each(['verbose', 'http', 'silly'])('rejects winston-only level %s (undocumented on the CLI)', (level) => {
+    expect(() => parse(['--log-level', level])).toThrow(/error, warn, info, debug/);
+  });
 });

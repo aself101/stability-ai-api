@@ -253,7 +253,7 @@ export class StabilityAPI {
     const errors = (body as ErrorResponseData | undefined)?.errors;
     let message: string;
     if (status === 401) {
-      message = 'Authentication failed. Check your API key.';
+      message = 'Authentication failed. Check your API key (keys: https://platform.stability.ai/account/keys).';
     } else if (status === 402) {
       // HTTP 402 Payment Required. [VERIFY] that Stability uses it for an empty
       // balance; mapped so an out-of-credits account is not reported as a

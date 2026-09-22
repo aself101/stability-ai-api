@@ -713,6 +713,10 @@ async function handleGenerateCommand(model: string, options: GenerateOptions, gl
         const err = toError(error);
         logger.error('='.repeat(60));
         logger.error(`${batchPrefix}✗ Generation failed: ${err.message}`);
+        if (total > 1) {
+          const skipped = total - index - 1;
+          logger.error(`Batch stopped: ${index} of ${total} saved; prompt ${index + 1} failed; ${skipped} not submitted.`);
+        }
         logger.error('='.repeat(60));
         throw error;
       }

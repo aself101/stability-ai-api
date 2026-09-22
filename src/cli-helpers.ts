@@ -96,15 +96,19 @@ export function parseIntOption(value: string): number {
   return n;
 }
 
+/** Levels the CLI documents for --log-level; winston's http/verbose/silly are not offered. */
+export const CLI_LOG_LEVELS = ['error', 'warn', 'info', 'debug'] as const;
+
 /**
- * Commander parser for --log-level: case-insensitive, and one of winston's
- * levels. An unknown or uppercase level used to reach winston as given and
- * silence every line, errors included.
+ * Commander parser for --log-level: case-insensitive, and one of the four
+ * documented levels. An unknown or uppercase level used to reach winston as
+ * given and silence every line, errors included. The set is the documented
+ * one rather than all of winston's, so help, README and this error agree.
  */
 export function parseLogLevel(value: string): string {
   const level = value.toLowerCase();
-  if (!(level in logger.levels)) {
-    throw new InvalidArgumentError(`use one of: ${Object.keys(logger.levels).join(', ')}.`);
+  if (!(CLI_LOG_LEVELS as readonly string[]).includes(level)) {
+    throw new InvalidArgumentError(`use one of: ${CLI_LOG_LEVELS.join(', ')}.`);
   }
   return level;
 }

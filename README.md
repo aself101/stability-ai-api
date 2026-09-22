@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node.js Version](https://img.shields.io/node/v/stability-ai-api)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue.svg)](https://www.typescriptlang.org/)
-[![Tests](https://img.shields.io/badge/tests-517%20passing-brightgreen)](test/)
+[![Tests](https://img.shields.io/badge/tests-520%20passing-brightgreen)](test/)
 [![Coverage](https://img.shields.io/badge/coverage-94.4%25-brightgreen)](test/)
 
 A TypeScript/Node.js wrapper for the [Stability AI API](https://platform.stability.ai/docs/api-reference) that provides easy access to Stable Diffusion 3.5, image upscaling, editing, and control models. Generate stunning AI images, upscale, edit, and control them with professional quality through a simple command-line interface.
@@ -12,6 +12,8 @@ A TypeScript/Node.js wrapper for the [Stability AI API](https://platform.stabili
 This service follows the data-collection architecture pattern with organized data storage, automatic polling for async operations, retry logic, comprehensive logging, and CLI orchestration.
 
 ## Quick Start
+
+Requires **Node.js 22 or later** (native `fetch`, `FormData` and `Blob`).
 
 ### CLI Usage
 ```bash
@@ -84,7 +86,7 @@ The Stability AI API provides access to state-of-the-art image generation and up
 - **Organized Storage** - Structured directories with timestamped files and metadata
 - **CLI Orchestration** - Command-line tool with subcommands for generation and upscaling
 - **Full TypeScript Support** - Complete type definitions for all API methods, parameters, and responses
-- **Comprehensive Testing** - 517 tests, 94.4% line coverage (api.ts 97.3%, cli-helpers.ts 100%, config.ts 93.8%, http.ts 91.3%, utils.ts 91.9%; measured at the release commit, 2026-09-22), no network access; a spec-drift check against the live API runs in CI
+- **Comprehensive Testing** - 520 tests, 94.4% line coverage (api.ts 97.3%, cli-helpers.ts 100%, config.ts 93.8%, http.ts 91.3%, utils.ts 91.9%; measured at the release commit, 2026-09-22), no network access; a spec-drift check against the live API runs in CI
 
 ### Endpoint Summary
 
@@ -1269,7 +1271,7 @@ sai generate sd3 \
 
 Generated images and metadata are saved in organized directories:
 
-```
+```text
 datasets/
 └── stability/
     ├── stable-image-ultra/

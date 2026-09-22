@@ -110,7 +110,7 @@ describe('async task responses', () => {
 
 describe('error mapping', () => {
   const cases = [
-    [401, 'Authentication failed. Check your API key.'],
+    [401, 'Authentication failed. Check your API key (keys: https://platform.stability.ai/account/keys).'],
     [402, 'Payment required: check your Stability credit balance.'],
     [403, 'Forbidden: flagged by content moderation, or not permitted for this key.'],
     [413, 'Request payload too large (max 10MB).'],
@@ -397,6 +397,6 @@ describe('getBalance', () => {
 
     expect(error).toBeInstanceOf(StabilityHttpError);
     expect(error.status).toBe(401);
-    expect(error.message).toBe('Authentication failed. Check your API key.');
+    expect(error.message).toBe('Authentication failed. Check your API key (keys: https://platform.stability.ai/account/keys).');
   });
 });

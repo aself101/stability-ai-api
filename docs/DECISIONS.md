@@ -4,6 +4,31 @@ Why the 1.0 rewrite is shaped the way it is: what was decided, the reason, and w
 would break the reasoning. Where a decision copies bfl-api 2.0.1, it says so and cites
 bfl's `docs/DECISIONS.md` number, so a fix to one package can be carried to the other.
 
+**Contents**
+
+- [1. Scope of the 1.0 endpoint set](#1-scope-of-the-10-endpoint-set)
+- [2. Send only what the caller set; one registry of fields](#2-send-only-what-the-caller-set-one-registry-of-fields)
+- [3. The spec is checked, not trusted](#3-the-spec-is-checked-not-trusted)
+- [4. The server's validator is an oracle, and it is free](#4-the-servers-validator-is-an-oracle-and-it-is-free)
+- [5. Where the spec and the server disagreed](#5-where-the-spec-and-the-server-disagreed)
+- [6. SD 3.5 `mode` is derived, not a parameter](#6-sd-35-mode-is-derived-not-a-parameter)
+- [7. Image-to-image rules are enforced before the request](#7-image-to-image-rules-are-enforced-before-the-request)
+- [8. One `sd3` endpoint key](#8-one-sd3-endpoint-key)
+- [9. Native fetch; API requests follow no redirects](#9-native-fetch-api-requests-follow-no-redirects)
+- [10. SSRF: every hop, every address, every embedded form](#10-ssrf-every-hop-every-address-every-embedded-form)
+- [11. Retry on type, only while polling](#11-retry-on-type-only-while-polling)
+- [12. Typed errors, sanitised messages](#12-typed-errors-sanitised-messages)
+- [13. The unit suite never touches the network](#13-the-unit-suite-never-touches-the-network)
+- [14. Releases are manual; the version is 1.0.0](#14-releases-are-manual-the-version-is-100)
+- [15. Line endings are LF](#15-line-endings-are-lf)
+- [16. Response shapes are checked, not cast](#16-response-shapes-are-checked-not-cast)
+- [17. The constructor takes the key three ways](#17-the-constructor-takes-the-key-three-ways)
+- [18. CLI mapping lives in `cli-helpers.ts`](#18-cli-mapping-lives-in-cli-helpersts)
+- [19. The library has no host-process side effects; the CLI does](#19-the-library-has-no-host-process-side-effects-the-cli-does)
+- [20. A content-filtered result is a success with a warning, not an error](#20-a-content-filtered-result-is-a-success-with-a-warning-not-an-error)
+- [21. Known gaps recorded rather than fixed in 1.0](#21-known-gaps-recorded-rather-than-fixed-in-10)
+- [22. Task ids are validated before they are put in a URL](#22-task-ids-are-validated-before-they-are-put-in-a-url)
+
 ## 1. Scope of the 1.0 endpoint set
 
 1.0 covers the 17 `v2beta/stable-image` submit endpoints (generate ×3, upscale ×3,
