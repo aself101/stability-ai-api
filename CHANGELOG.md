@@ -6,6 +6,12 @@ semantic-release from commit subjects and are kept as they were.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-09-22
+
+Brings the wrapper to the bfl-api 2.0 / kling-api 2.0 baseline and the current Stability API.
+Every endpoint and SD 3.5 model was run live before release (`docs/LIVE-BATTERY-2026-09-22.md`);
+the reasoning behind each change is in `docs/DECISIONS.md`.
+
 ### Changed
 
 - **BREAKING — requires Node.js 22.** The HTTP layer is native `fetch` (`src/http.ts`,
