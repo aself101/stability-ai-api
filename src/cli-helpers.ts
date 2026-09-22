@@ -9,6 +9,7 @@
  */
 
 import path from 'path';
+import { InvalidArgumentError } from 'commander';
 import { getOutputDir } from './config.js';
 import { writeToFile, ensureDirectory, promptToFilename, generateTimestampedFilename, logger } from './utils.js';
 import type { ImageResult, SD3Params, UpscaleParams } from './types/index.js';
@@ -78,6 +79,30 @@ export interface ControlOptions {
   seed?: number;
   outputFormat: string;
   stylePreset?: string;
+}
+
+/**
+ * Commander option parser for integers. Commander calls a parser as
+ * `parser(value, previousOrDefault)`, so passing bare `parseInt` (as 0.4.0 did)
+ * made the option's default the radix: `--grow-mask 10` with default 5 parsed
+ * as 5, `--grow-mask 7` as NaN — sent on paid requests. This takes one
+ * argument, parses base 10 and rejects anything that is not a whole number.
+ */
+export function parseIntOption(value: string): number {
+  const n = Number(value);
+  if (value.trim() === '' || !Number.isInteger(n)) {
+    throw new InvalidArgumentError(`"${value}" is not an integer.`);
+  }
+  return n;
+}
+
+/** Commander option parser for numbers: rejects NaN, Infinity and trailing junk ("0.5x"). */
+export function parseFloatOption(value: string): number {
+  const n = Number(value);
+  if (value.trim() === '' || !Number.isFinite(n)) {
+    throw new InvalidArgumentError(`"${value}" is not a number.`);
+  }
+  return n;
 }
 
 /**

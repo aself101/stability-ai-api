@@ -1019,3 +1019,18 @@ describe('seed boundaries: 0 and 4294967294 accepted, -1 and 4294967295 rejected
     expect(seedErrors(validate(-1))).toHaveLength(1);
   });
 });
+
+// NaN and Infinity used to pass every range check (`v < min || v > max` is
+// false for NaN), so a bad number reached the server as the string "NaN".
+describe('range checks reject non-finite numbers', () => {
+  it.each([
+    ['model seed', () => validateModelParams('stable-image-core', { seed: NaN })],
+    ['model cfg_scale', () => validateModelParams('sd3', { cfg_scale: Infinity })],
+    ['model strength', () => validateModelParams('sd3', { image: 'x.png', strength: NaN })],
+    ['edit grow_mask', () => validateEditParams('erase', { grow_mask: NaN })],
+    ['edit outpaint direction', () => validateEditParams('outpaint', { left: NaN })],
+    ['control strength', () => validateControlParams('sketch', { prompt: 'p', control_strength: NaN })],
+  ])('%s', (_name, run) => {
+    expect(run().valid).toBe(false);
+  });
+});

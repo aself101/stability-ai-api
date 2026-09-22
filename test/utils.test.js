@@ -777,6 +777,13 @@ describe('URL downloads', () => {
     expect(await urlToBase64('https://cdn.example/a.png')).toBe(PNG_BYTES.toString('base64'));
   });
 
+  it('keeps the typed HTTP error as the cause, so a 404 is distinguishable from a timeout', async () => {
+    stubFetch(() => new Response('gone', { status: 404 }));
+    const error = await urlToBuffer('https://cdn.example/missing.png').catch(e => e);
+    expect(error.cause?.name).toBe('StabilityHttpError');
+    expect(error.cause?.status).toBe(404);
+  });
+
   it('does not treat an error page as an image', async () => {
     stubFetch(() => new Response('<html>not found</html>', { status: 404, headers: { 'content-type': 'text/html' } }));
     await expect(urlToBuffer('https://cdn.example/missing.png')).rejects.toThrow('404');

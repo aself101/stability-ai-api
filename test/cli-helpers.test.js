@@ -17,8 +17,11 @@ import {
   buildEditParams,
   buildControlParams,
   requiredString,
+  parseIntOption,
+  parseFloatOption,
   saveImageResult,
 } from '../src/cli-helpers.js';
+import { Command } from 'commander';
 import { PNG_BYTES } from './helpers/fetch-mock.js';
 
 describe('buildGenerateParams', () => {
@@ -185,5 +188,43 @@ describe('saveImageResult', () => {
   it('uses .png when no output_format was requested (the server default)', async () => {
     const { imagePath } = await saveImageResult({ image: PNG_BYTES }, 'p', 'stable-image-core', { prompt: 'p' }, dir);
     expect(imagePath).toMatch(/\.png$/);
+  });
+});
+
+// Through commander itself: it calls a parser as parser(value, previousOrDefault),
+// which is how bare parseInt with a default of 5 parsed "--grow-mask 10" as 5
+// and "7" as NaN in 0.4.0 (found by the ship pipeline's code-auditor). The
+// earlier tests passed numbers straight to the builders and never saw it.
+describe('numeric option parsers under commander', () => {
+  const parse = (parser, dflt, argv) => {
+    const program = new Command().exitOverride().configureOutput({ writeErr: () => {} });
+    program.option('--n <value>', '', parser, dflt);
+    program.parse(['node', 'sai', ...argv]);
+    return program.opts().n;
+  };
+
+  it.each([['10', 10], ['7', 7], ['12', 12], ['0', 0], ['20', 20]])('parseIntOption with a default of 5: %s → %s', (input, expected) => {
+    expect(parse(parseIntOption, 5, ['--n', input])).toBe(expected);
+  });
+
+  it('keeps the default when the flag is absent', () => {
+    expect(parse(parseIntOption, 5, [])).toBe(5);
+  });
+
+  it.each(['abc', '1.5', '12px', ''])('parseIntOption rejects %o', (input) => {
+    expect(() => parse(parseIntOption, 5, ['--n', input])).toThrow();
+  });
+
+  it.each([['0.35', 0.35], ['1', 1], ['1e-1', 0.1]])('parseFloatOption: %s → %s', (input, expected) => {
+    expect(parse(parseFloatOption, 0.5, ['--n', input])).toBe(expected);
+  });
+
+  it.each(['x', '0.5x', 'Infinity', 'NaN'])('parseFloatOption rejects %o', (input) => {
+    expect(() => parse(parseFloatOption, 0.5, ['--n', input])).toThrow();
+  });
+
+  it('the 0.4.0 bug, for the record: bare parseInt takes the default as its radix', () => {
+    expect(parse(parseInt, 5, ['--n', '10'])).toBe(5);
+    expect(Number.isNaN(parse(parseInt, 5, ['--n', '7']))).toBe(true);
   });
 });

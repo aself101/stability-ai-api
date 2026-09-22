@@ -9,6 +9,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   StabilityAPI,
+  StabilityResponseError,
   StabilityHttpError,
   StabilityNetworkError,
   StabilityTimeoutError,
@@ -260,6 +261,26 @@ describe('waitForResult', () => {
     expect(calls).toHaveLength(script.length);
   });
 
+  it('a final 2xx that is neither an image nor a task handle throws at once (0.4.0 re-polled it to the timeout)', async () => {
+    const calls = stubFetch(() => jsonResponse(200, { finish_reason: 'CONTENT_FILTERED' }));
+
+    const error = await api.waitForResult('t', opts).catch(e => e);
+
+    expect(error).toBeInstanceOf(StabilityResponseError);
+    expect(error.body).toEqual({ finish_reason: 'CONTENT_FILTERED' });
+    expect(calls).toHaveLength(1);
+  });
+
+  it('never sleeps past the overall timeout, whatever Retry-After says', async () => {
+    stubFetch(() => jsonResponse(429, {}, { 'retry-after': '3600' }));
+
+    const started = Date.now();
+    const error = await api.waitForResult('t', { ...opts, timeout: 0.3 }).catch(e => e);
+
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(error.message).toMatch(/Timeout waiting for task t/);
+  });
+
   it('throws a permanent error immediately', async () => {
     const calls = stubFetch(() => jsonResponse(400, { errors: ['bad id'] }));
 
@@ -269,7 +290,7 @@ describe('waitForResult', () => {
     expect(calls).toHaveLength(1);
   });
 
-  it('waits at least Retry-After before retrying a 429', async () => {
+  it('waits at least Retry-After before retrying a 429 (within the timeout)', async () => {
     const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
     stubFetch((_url, _init, i) =>
       i === 0 ? jsonResponse(429, {}, { 'retry-after': '0.01' }) : imageResponse()

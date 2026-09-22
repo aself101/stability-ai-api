@@ -43,6 +43,8 @@ import {
   buildEditParams,
   buildControlParams,
   requiredString,
+  parseIntOption,
+  parseFloatOption,
   saveImageResult,
   type GenerateOptions,
   type UpscaleOptions,
@@ -249,10 +251,10 @@ generateCmd
   .option('-p, --prompt <text...>', 'Text prompt(s) - can specify multiple', [])
   .option('-n, --negative-prompt <text>', 'Negative prompt')
   .option('-a, --aspect-ratio <ratio>', 'Aspect ratio (e.g., 16:9, 1:1)', '1:1')
-  .option('-s, --seed <number>', 'Random seed (0-4294967294)', parseInt)
+  .option('-s, --seed <number>', 'Random seed (0-4294967294)', parseIntOption)
   .option('-f, --output-format <format>', 'Output format (jpeg, png, webp)', 'png')
   .option('-i, --image <path>', 'Input image for image-to-image (requires --strength)')
-  .option('--strength <number>', 'Image-to-image strength (0-1; 0 keeps the input, 1 ignores it)', parseFloat)
+  .option('--strength <number>', 'Image-to-image strength (0-1; 0 keeps the input, 1 ignores it)', parseFloatOption)
   .option('--style-preset <style>', `Style preset: ${STYLE_PRESETS.join(', ')}`)
   .action(async (options: GenerateOptions, command: Command) => {
     await handleGenerateCommand('stable-image-ultra', options, command.optsWithGlobals() as GlobalOptions);
@@ -267,7 +269,7 @@ generateCmd
   .option('-p, --prompt <text...>', 'Text prompt(s) - can specify multiple', [])
   .option('-n, --negative-prompt <text>', 'Negative prompt')
   .option('-a, --aspect-ratio <ratio>', 'Aspect ratio', '1:1')
-  .option('-s, --seed <number>', 'Random seed', parseInt)
+  .option('-s, --seed <number>', 'Random seed', parseIntOption)
   .option('-f, --output-format <format>', 'Output format (jpeg, png, webp)', 'png')
   .option('--style-preset <style>', 'Style preset (photographic, anime, etc.)')
   .action(async (options: GenerateOptions, command: Command) => {
@@ -286,11 +288,11 @@ generateCmd
   // No default: aspect ratio is text-to-image only on SD3.5, and the server
   // default is already 1:1.
   .option('-a, --aspect-ratio <ratio>', 'Aspect ratio, text-to-image only (server default 1:1)')
-  .option('-s, --seed <number>', 'Random seed', parseInt)
+  .option('-s, --seed <number>', 'Random seed', parseIntOption)
   .option('-f, --output-format <format>', 'Output format (jpeg, png, webp)', 'png')
   .option('-i, --image <path>', 'Input image: makes this image-to-image (requires --strength)')
-  .option('--strength <number>', 'Image-to-image strength (0-1; 0 keeps the input, 1 ignores it)', parseFloat)
-  .option('--cfg-scale <number>', 'Prompt adherence 1-10 (server default 4 Large/Medium, 1 Turbo/Flash)', parseFloat)
+  .option('--strength <number>', 'Image-to-image strength (0-1; 0 keeps the input, 1 ignores it)', parseFloatOption)
+  .option('--cfg-scale <number>', 'Prompt adherence 1-10 (server default 4 Large/Medium, 1 Turbo/Flash)', parseFloatOption)
   .option('--style-preset <style>', `Style preset: ${STYLE_PRESETS.join(', ')}`)
   .action(async (options: GenerateOptions, command: Command) => {
     await handleGenerateCommand('sd3', options, command.optsWithGlobals() as GlobalOptions);
@@ -324,8 +326,8 @@ upscaleCmd
   .requiredOption('-i, --image <path>', 'Input image path')
   .requiredOption('-p, --prompt <text>', 'Enhancement prompt (required by the API)')
   .option('-n, --negative-prompt <text>', 'Negative prompt')
-  .option('-c, --creativity <number>', 'Creativity level (0.2-0.5, server default 0.35)', parseFloat)
-  .option('-s, --seed <number>', 'Random seed', parseInt)
+  .option('-c, --creativity <number>', 'Creativity level (0.2-0.5, server default 0.35)', parseFloatOption)
+  .option('-s, --seed <number>', 'Random seed', parseIntOption)
   .option('-f, --output-format <format>', 'Output format', 'png')
   .action(async (options: UpscaleOptions, command: Command) => {
     await handleUpscaleCommand('upscale-conservative', options, command.optsWithGlobals() as GlobalOptions);
@@ -340,9 +342,9 @@ upscaleCmd
   .requiredOption('-i, --image <path>', 'Input image path')
   .requiredOption('-p, --prompt <text>', 'Enhancement prompt (required by the API)')
   .option('-n, --negative-prompt <text>', 'Negative prompt')
-  .option('-c, --creativity <number>', 'Creativity level (0.1-0.5, server default 0.3)', parseFloat)
+  .option('-c, --creativity <number>', 'Creativity level (0.1-0.5, server default 0.3)', parseFloatOption)
   .option('--style-preset <style>', `Style preset: ${STYLE_PRESETS.join(', ')}`)
-  .option('-s, --seed <number>', 'Random seed', parseInt)
+  .option('-s, --seed <number>', 'Random seed', parseIntOption)
   .option('-f, --output-format <format>', 'Output format', 'png')
   .action(async (options: UpscaleOptions, command: Command) => {
     await handleUpscaleCommand('upscale-creative', options, command.optsWithGlobals() as GlobalOptions);
@@ -373,8 +375,8 @@ editCmd
   .description('Remove unwanted objects from images using masks')
   .requiredOption('-i, --image <path>', 'Input image path')
   .option('-m, --mask <path>', 'Mask image path (white=erase). If omitted, uses image alpha channel')
-  .option('--grow-mask <number>', 'Pixels to grow mask edges (0-20)', parseInt, 5)
-  .option('-s, --seed <number>', 'Random seed (0-4294967294)', parseInt)
+  .option('--grow-mask <number>', 'Pixels to grow mask edges (0-20)', parseIntOption, 5)
+  .option('-s, --seed <number>', 'Random seed (0-4294967294)', parseIntOption)
   .option('-f, --output-format <format>', 'Output format (jpeg, png, webp)', 'png')
   .action(async (options: EditOptions, command: Command) => {
     await handleEditCommand('erase', options, command.optsWithGlobals() as GlobalOptions);
@@ -390,8 +392,8 @@ editCmd
   .requiredOption('-p, --prompt <text>', 'What to generate in masked area')
   .option('-m, --mask <path>', 'Mask image path (white=inpaint). If omitted, uses image alpha channel')
   .option('-n, --negative-prompt <text>', 'What NOT to generate')
-  .option('--grow-mask <number>', 'Pixels to grow mask edges (0-100)', parseInt, 5)
-  .option('-s, --seed <number>', 'Random seed (0-4294967294)', parseInt)
+  .option('--grow-mask <number>', 'Pixels to grow mask edges (0-100)', parseIntOption, 5)
+  .option('-s, --seed <number>', 'Random seed (0-4294967294)', parseIntOption)
   .option('-f, --output-format <format>', 'Output format (jpeg, png, webp)', 'png')
   .option('--style-preset <style>', `Style preset: ${STYLE_PRESETS.join(', ')}`)
   .action(async (options: EditOptions, command: Command) => {
@@ -405,13 +407,13 @@ editCmd
   .command('outpaint')
   .description('Extend image boundaries in any direction')
   .requiredOption('-i, --image <path>', 'Input image path')
-  .option('--left <pixels>', 'Pixels to extend left (0-2000)', parseInt, 0)
-  .option('--right <pixels>', 'Pixels to extend right (0-2000)', parseInt, 0)
-  .option('--up <pixels>', 'Pixels to extend up (0-2000)', parseInt, 0)
-  .option('--down <pixels>', 'Pixels to extend down (0-2000)', parseInt, 0)
-  .option('-c, --creativity <number>', 'How creative the outpainting should be (0-1)', parseFloat, 0.5)
+  .option('--left <pixels>', 'Pixels to extend left (0-2000)', parseIntOption, 0)
+  .option('--right <pixels>', 'Pixels to extend right (0-2000)', parseIntOption, 0)
+  .option('--up <pixels>', 'Pixels to extend up (0-2000)', parseIntOption, 0)
+  .option('--down <pixels>', 'Pixels to extend down (0-2000)', parseIntOption, 0)
+  .option('-c, --creativity <number>', 'How creative the outpainting should be (0-1)', parseFloatOption, 0.5)
   .option('-p, --prompt <text>', 'What to generate in extended areas')
-  .option('-s, --seed <number>', 'Random seed (0-4294967294)', parseInt)
+  .option('-s, --seed <number>', 'Random seed (0-4294967294)', parseIntOption)
   .option('-f, --output-format <format>', 'Output format (jpeg, png, webp)', 'png')
   .option('--style-preset <style>', `Style preset: ${STYLE_PRESETS.join(', ')}`)
   .action(async (options: EditOptions, command: Command) => {
@@ -428,8 +430,8 @@ editCmd
   .requiredOption('-p, --prompt <text>', 'What to replace with')
   .requiredOption('--search <text>', 'Short description of what to find')
   .option('-n, --negative-prompt <text>', 'What NOT to generate')
-  .option('--grow-mask <number>', 'Pixels to grow auto-detected mask (0-20)', parseInt, 3)
-  .option('-s, --seed <number>', 'Random seed (0-4294967294)', parseInt)
+  .option('--grow-mask <number>', 'Pixels to grow auto-detected mask (0-20)', parseIntOption, 3)
+  .option('-s, --seed <number>', 'Random seed (0-4294967294)', parseIntOption)
   .option('-f, --output-format <format>', 'Output format (jpeg, png, webp)', 'png')
   .option('--style-preset <style>', `Style preset: ${STYLE_PRESETS.join(', ')}`)
   .action(async (options: EditOptions, command: Command) => {
@@ -446,8 +448,8 @@ editCmd
   .requiredOption('-p, --prompt <text>', 'Desired color/appearance')
   .requiredOption('--select <text>', 'Short description of what to find')
   .option('-n, --negative-prompt <text>', 'What NOT to generate')
-  .option('--grow-mask <number>', 'Pixels to grow auto-detected mask (0-20)', parseInt, 3)
-  .option('-s, --seed <number>', 'Random seed (0-4294967294)', parseInt)
+  .option('--grow-mask <number>', 'Pixels to grow auto-detected mask (0-20)', parseIntOption, 3)
+  .option('-s, --seed <number>', 'Random seed (0-4294967294)', parseIntOption)
   .option('-f, --output-format <format>', 'Output format (jpeg, png, webp)', 'png')
   .option('--style-preset <style>', `Style preset: ${STYLE_PRESETS.join(', ')}`)
   .action(async (options: EditOptions, command: Command) => {
@@ -477,13 +479,13 @@ editCmd
   .option('--background-reference <path>', 'Reference image for background style')
   .option('--foreground-prompt <text>', 'Description of subject (prevents background bleeding)')
   .option('-n, --negative-prompt <text>', 'What NOT to generate')
-  .option('--preserve-subject <number>', 'Subject overlay strength (0-1, 1.0=pixel perfect)', parseFloat, 0.6)
-  .option('--background-depth <number>', 'Background depth matching (0-1)', parseFloat, 0.5)
+  .option('--preserve-subject <number>', 'Subject overlay strength (0-1, 1.0=pixel perfect)', parseFloatOption, 0.6)
+  .option('--background-depth <number>', 'Background depth matching (0-1)', parseFloatOption, 0.5)
   .option('--keep-original-bg', 'Keep original background with new lighting only')
   .option('--light-direction <dir>', 'Direction of light (left, right, above, below)')
   .option('--light-reference <path>', 'Reference image for lighting')
-  .option('--light-strength <number>', 'Light intensity (0-1, requires light-reference or light-direction)', parseFloat)
-  .option('-s, --seed <number>', 'Random seed (0-4294967294)', parseInt)
+  .option('--light-strength <number>', 'Light intensity (0-1, requires light-reference or light-direction)', parseFloatOption)
+  .option('-s, --seed <number>', 'Random seed (0-4294967294)', parseIntOption)
   .option('-f, --output-format <format>', 'Output format (jpeg, png, webp)', 'png')
   .action(async (options: EditOptions, command: Command) => {
     await handleEditCommand('replace-background-and-relight', options, command.optsWithGlobals() as GlobalOptions);
@@ -516,9 +518,9 @@ controlCmd
   .description('Convert sketches to refined images with precise control')
   .requiredOption('-i, --image <path>', 'Input sketch image path')
   .requiredOption('-p, --prompt <text>', 'What to generate from the sketch')
-  .option('--control-strength <number>', 'Influence of sketch on generation (0-1)', parseFloat, 0.7)
+  .option('--control-strength <number>', 'Influence of sketch on generation (0-1)', parseFloatOption, 0.7)
   .option('-n, --negative-prompt <text>', 'What NOT to generate')
-  .option('-s, --seed <number>', 'Random seed (0-4294967294)', parseInt)
+  .option('-s, --seed <number>', 'Random seed (0-4294967294)', parseIntOption)
   .option('-f, --output-format <format>', 'Output format (jpeg, png, webp)', 'png')
   .option('--style-preset <style>', `Style preset: ${STYLE_PRESETS.join(', ')}`)
   .action(async (options: ControlOptions, command: Command) => {
@@ -533,9 +535,9 @@ controlCmd
   .description('Generate images while preserving input structure')
   .requiredOption('-i, --image <path>', 'Input image whose structure to preserve')
   .requiredOption('-p, --prompt <text>', 'What to generate with the structure')
-  .option('--control-strength <number>', 'Influence of structure on generation (0-1)', parseFloat, 0.7)
+  .option('--control-strength <number>', 'Influence of structure on generation (0-1)', parseFloatOption, 0.7)
   .option('-n, --negative-prompt <text>', 'What NOT to generate')
-  .option('-s, --seed <number>', 'Random seed (0-4294967294)', parseInt)
+  .option('-s, --seed <number>', 'Random seed (0-4294967294)', parseIntOption)
   .option('-f, --output-format <format>', 'Output format (jpeg, png, webp)', 'png')
   .option('--style-preset <style>', `Style preset: ${STYLE_PRESETS.join(', ')}`)
   .action(async (options: ControlOptions, command: Command) => {
@@ -550,10 +552,10 @@ controlCmd
   .description('Generate images guided by a style reference')
   .requiredOption('-i, --image <path>', 'Style reference image')
   .requiredOption('-p, --prompt <text>', 'What to generate with this style')
-  .option('--fidelity <number>', 'How closely output resembles input style (0-1)', parseFloat, 0.5)
+  .option('--fidelity <number>', 'How closely output resembles input style (0-1)', parseFloatOption, 0.5)
   .option('-a, --aspect-ratio <ratio>', `Output aspect ratio: ${ASPECT_RATIOS.join(', ')}`, '1:1')
   .option('-n, --negative-prompt <text>', 'What NOT to generate')
-  .option('-s, --seed <number>', 'Random seed (0-4294967294)', parseInt)
+  .option('-s, --seed <number>', 'Random seed (0-4294967294)', parseIntOption)
   .option('-f, --output-format <format>', 'Output format (jpeg, png, webp)', 'png')
   .option('--style-preset <style>', `Style preset: ${STYLE_PRESETS.join(', ')}`)
   .action(async (options: ControlOptions, command: Command) => {
@@ -570,10 +572,10 @@ controlCmd
   .requiredOption('--style-image <path>', 'Style reference image')
   .option('-p, --prompt <text>', 'Optional prompt to guide transfer')
   .option('-n, --negative-prompt <text>', 'What NOT to generate')
-  .option('--style-strength <number>', 'Influence of style image (0-1, 0=identical to input)', parseFloat)
-  .option('--composition-fidelity <number>', 'How closely to preserve composition (0-1)', parseFloat, 0.9)
-  .option('--change-strength <number>', 'How much the original should change (0.1-1)', parseFloat, 0.9)
-  .option('-s, --seed <number>', 'Random seed (0-4294967294)', parseInt)
+  .option('--style-strength <number>', 'Influence of style image (0-1, 0=identical to input)', parseFloatOption)
+  .option('--composition-fidelity <number>', 'How closely to preserve composition (0-1)', parseFloatOption, 0.9)
+  .option('--change-strength <number>', 'How much the original should change (0.1-1)', parseFloatOption, 0.9)
+  .option('-s, --seed <number>', 'Random seed (0-4294967294)', parseIntOption)
   .option('-f, --output-format <format>', 'Output format (jpeg, png, webp)', 'png')
   .action(async (options: ControlOptions, command: Command) => {
     await handleControlCommand('style-transfer', options, command.optsWithGlobals() as GlobalOptions);

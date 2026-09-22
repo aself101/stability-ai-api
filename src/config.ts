@@ -554,7 +554,7 @@ export function validateModelParams(model: string, params: ValidationParams): Va
   // Validate seed
   if (params.seed !== undefined && constraints.seed) {
     const { min, max } = constraints.seed;
-    if (params.seed < min || params.seed > max) {
+    if (!Number.isFinite(params.seed) || params.seed < min || params.seed > max) {
       errors.push(`Seed must be between ${min} and ${max} for ${model}`);
     }
   }
@@ -562,7 +562,7 @@ export function validateModelParams(model: string, params: ValidationParams): Va
   // Validate strength (for image-to-image)
   if (params.strength !== undefined && constraints.strength) {
     const { min, max } = constraints.strength;
-    if (params.strength < min || params.strength > max) {
+    if (!Number.isFinite(params.strength) || params.strength < min || params.strength > max) {
       errors.push(`Strength must be between ${min} and ${max} for ${model}`);
     }
   }
@@ -570,7 +570,7 @@ export function validateModelParams(model: string, params: ValidationParams): Va
   // Validate cfg_scale (SD3.5)
   if (params.cfg_scale !== undefined && constraints.cfg_scale) {
     const { min, max } = constraints.cfg_scale;
-    if (params.cfg_scale < min || params.cfg_scale > max) {
+    if (!Number.isFinite(params.cfg_scale) || params.cfg_scale < min || params.cfg_scale > max) {
       errors.push(`cfg_scale must be between ${min} and ${max} for ${model}`);
     }
   }
@@ -580,7 +580,7 @@ export function validateModelParams(model: string, params: ValidationParams): Va
   // Validate creativity (for creative upscale)
   if (params.creativity !== undefined && constraints.creativity) {
     const { min, max } = constraints.creativity;
-    if (params.creativity < min || params.creativity > max) {
+    if (!Number.isFinite(params.creativity) || params.creativity < min || params.creativity > max) {
       errors.push(`Creativity must be between ${min} and ${max} for ${model}`);
     }
   }
@@ -750,7 +750,7 @@ export function validateEditParams(operation: string, params: ValidationParams):
   // Validate seed
   if (params.seed !== undefined && constraints.seed) {
     const { min, max } = constraints.seed;
-    if (params.seed < min || params.seed > max) {
+    if (!Number.isFinite(params.seed) || params.seed < min || params.seed > max) {
       errors.push(`Seed must be between ${min} and ${max} for ${operation}`);
     }
   }
@@ -758,7 +758,7 @@ export function validateEditParams(operation: string, params: ValidationParams):
   // Validate grow_mask
   if (params.grow_mask !== undefined && constraints.grow_mask) {
     const { min, max } = constraints.grow_mask;
-    if (params.grow_mask < min || params.grow_mask > max) {
+    if (!Number.isFinite(params.grow_mask) || params.grow_mask < min || params.grow_mask > max) {
       errors.push(`grow_mask must be between ${min} and ${max} for ${operation}`);
     }
   }
@@ -766,7 +766,7 @@ export function validateEditParams(operation: string, params: ValidationParams):
   // Validate creativity (for outpaint)
   if (params.creativity !== undefined && constraints.creativity) {
     const { min, max } = constraints.creativity;
-    if (params.creativity < min || params.creativity > max) {
+    if (!Number.isFinite(params.creativity) || params.creativity < min || params.creativity > max) {
       errors.push(`Creativity must be between ${min} and ${max} for ${operation}`);
     }
   }
@@ -778,7 +778,7 @@ export function validateEditParams(operation: string, params: ValidationParams):
     for (const dir of directions) {
       const value = params[dir];
       if (value !== undefined && typeof value === 'number') {
-        if (value < min || value > max) {
+        if (!Number.isFinite(value) || value < min || value > max) {
           errors.push(`${dir} must be between ${min} and ${max} for ${operation}`);
         }
       }
@@ -810,7 +810,7 @@ export function validateEditParams(operation: string, params: ValidationParams):
   // Validate preserve_original_subject (for replace-background-and-relight)
   if (params.preserve_original_subject !== undefined && constraints.preserve_original_subject) {
     const { min, max } = constraints.preserve_original_subject;
-    if (params.preserve_original_subject < min || params.preserve_original_subject > max) {
+    if (!Number.isFinite(params.preserve_original_subject) || params.preserve_original_subject < min || params.preserve_original_subject > max) {
       errors.push(`preserve_original_subject must be between ${min} and ${max} for ${operation}`);
     }
   }
@@ -818,7 +818,7 @@ export function validateEditParams(operation: string, params: ValidationParams):
   // Validate original_background_depth (for replace-background-and-relight)
   if (params.original_background_depth !== undefined && constraints.original_background_depth) {
     const { min, max } = constraints.original_background_depth;
-    if (params.original_background_depth < min || params.original_background_depth > max) {
+    if (!Number.isFinite(params.original_background_depth) || params.original_background_depth < min || params.original_background_depth > max) {
       errors.push(`original_background_depth must be between ${min} and ${max} for ${operation}`);
     }
   }
@@ -826,7 +826,7 @@ export function validateEditParams(operation: string, params: ValidationParams):
   // Validate light_source_strength (for replace-background-and-relight)
   if (params.light_source_strength !== undefined && constraints.light_source_strength) {
     const { min, max } = constraints.light_source_strength;
-    if (params.light_source_strength < min || params.light_source_strength > max) {
+    if (!Number.isFinite(params.light_source_strength) || params.light_source_strength < min || params.light_source_strength > max) {
       errors.push(`light_source_strength must be between ${min} and ${max} for ${operation}`);
     }
   }
@@ -923,7 +923,7 @@ export function validateControlParams(operation: string, params: ValidationParam
   // Validate seed
   if (params.seed !== undefined && constraints.seed) {
     const { min, max } = constraints.seed;
-    if (params.seed < min || params.seed > max) {
+    if (!Number.isFinite(params.seed) || params.seed < min || params.seed > max) {
       errors.push(`Seed must be between ${min} and ${max} for ${operation}`);
     }
   }
@@ -931,7 +931,7 @@ export function validateControlParams(operation: string, params: ValidationParam
   // Validate control_strength (for sketch and structure)
   if (params.control_strength !== undefined && constraints.control_strength) {
     const { min, max } = constraints.control_strength;
-    if (params.control_strength < min || params.control_strength > max) {
+    if (!Number.isFinite(params.control_strength) || params.control_strength < min || params.control_strength > max) {
       errors.push(`control_strength must be between ${min} and ${max} for ${operation}`);
     }
   }
@@ -939,7 +939,7 @@ export function validateControlParams(operation: string, params: ValidationParam
   // Validate fidelity (for style)
   if (params.fidelity !== undefined && constraints.fidelity) {
     const { min, max } = constraints.fidelity;
-    if (params.fidelity < min || params.fidelity > max) {
+    if (!Number.isFinite(params.fidelity) || params.fidelity < min || params.fidelity > max) {
       errors.push(`fidelity must be between ${min} and ${max} for ${operation}`);
     }
   }
@@ -956,7 +956,7 @@ export function validateControlParams(operation: string, params: ValidationParam
   // Validate style_strength (for style-transfer)
   if (params.style_strength !== undefined && constraints.style_strength) {
     const { min, max } = constraints.style_strength;
-    if (params.style_strength < min || params.style_strength > max) {
+    if (!Number.isFinite(params.style_strength) || params.style_strength < min || params.style_strength > max) {
       errors.push(`style_strength must be between ${min} and ${max} for ${operation}`);
     }
   }
@@ -964,7 +964,7 @@ export function validateControlParams(operation: string, params: ValidationParam
   // Validate composition_fidelity (for style-transfer)
   if (params.composition_fidelity !== undefined && constraints.composition_fidelity) {
     const { min, max } = constraints.composition_fidelity;
-    if (params.composition_fidelity < min || params.composition_fidelity > max) {
+    if (!Number.isFinite(params.composition_fidelity) || params.composition_fidelity < min || params.composition_fidelity > max) {
       errors.push(`composition_fidelity must be between ${min} and ${max} for ${operation}`);
     }
   }
@@ -972,7 +972,7 @@ export function validateControlParams(operation: string, params: ValidationParam
   // Validate change_strength (for style-transfer)
   if (params.change_strength !== undefined && constraints.change_strength) {
     const { min, max } = constraints.change_strength;
-    if (params.change_strength < min || params.change_strength > max) {
+    if (!Number.isFinite(params.change_strength) || params.change_strength < min || params.change_strength > max) {
       errors.push(`change_strength must be between ${min} and ${max} for ${operation}`);
     }
   }

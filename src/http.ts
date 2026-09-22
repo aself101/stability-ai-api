@@ -284,7 +284,8 @@ export async function request(
         try {
           parsed = JSON.parse(text) as unknown;
         } catch {
-          /* not JSON — keep the raw text */
+          // AUDIT-OK(no_empty_catch): not JSON — keep the raw text; the
+          // StabilityHttpError below carries it on .body either way.
         }
         throw new StabilityHttpError(
           `Request failed with status code ${response.status}`,
@@ -319,8 +320,8 @@ export async function requestJson(url: string, options: RequestOptions): Promise
   if (text.length === 0) return undefined;
   try {
     return JSON.parse(text) as unknown;
-  } catch {
-    throw new StabilityNetworkError(`Expected JSON from ${url} but received ${text.slice(0, 120)}`);
+  } catch (error) {
+    throw new StabilityNetworkError(`Expected JSON from ${url} but received ${text.slice(0, 120)}`, undefined, error);
   }
 }
 

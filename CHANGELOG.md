@@ -96,6 +96,26 @@ the reasoning behind each change is in `docs/DECISIONS.md`.
 
 ### Fixed
 
+- **`--grow-mask` sent the wrong number.** Commander calls an option parser as
+  `parser(value, default)`, and the CLI passed bare `parseInt`, so the default became the
+  radix: with default 5, `--grow-mask 10` sent 5 and `--grow-mask 7` sent NaN (erase,
+  inpaint; default 3 for search-and-replace/recolor: `12` sent 5). Present since at
+  least 0.4.0; found by the ship pipeline's code-auditor. Every numeric CLI option now
+  uses a base-10 / finite-number parser that rejects bad input (`12px`, `abc`,
+  `1.5` for an integer) with a clear error instead of coercing it.
+- NaN and Infinity passed every validator range check (`v < min || v > max` is false for
+  NaN), so they reached the server as the string "NaN". They are now rejected.
+- `waitForResult` treated any non-image response as "still running" and re-polled a
+  final JSON body until the timeout, then discarded it. Only a task handle keeps it
+  polling; anything else throws `StabilityResponseError` with the body.
+- `waitForResult` slept a server's `Retry-After` in full, past its own `timeout`
+  (a Retry-After of 3600 stalled for an hour; a value beyond setTimeout's ceiling fired
+  immediately). Waits are now capped at the remaining budget.
+- Constructing a `StabilityAPI` without `logLevel` reset the shared logger to `info`,
+  undoing an earlier `setLogLevel()`. The level is now set only when passed.
+- Wrapped errors keep the original as `cause` — in particular a failed image download
+  keeps the typed `StabilityHttpError` / `StabilityTimeoutError`, so a 404 is
+  distinguishable from a timeout.
 - **`--output-format webp` saved corrupt files.** `writeToFile` treated only
   .png/.jpg/.jpeg as binary, so a .webp image was written as `String(buffer)` —
   UTF-8 decoded, the bytes mangled. A Buffer is now always written as binary, and

@@ -171,8 +171,8 @@ export async function validateImageUrl(url: string): Promise<string> {
 
   try {
     parsed = new URL(url);
-  } catch {
-    throw new Error(`Invalid URL: ${url}`);
+  } catch (error) {
+    throw new Error(`Invalid URL: ${url}`, { cause: error });
   }
 
   // Only allow HTTPS (not HTTP)
@@ -212,11 +212,11 @@ export async function validateImageUrl(url: string): Promise<string> {
     } catch (error) {
       if (errorCode(error) === 'ENOTFOUND') {
         logger.warn(`SECURITY: Domain ${hostname} could not be resolved`);
-        throw new Error(`Domain ${hostname} could not be resolved`);
+        throw new Error(`Domain ${hostname} could not be resolved`, { cause: error });
       }
       const err = toError(error);
       logger.warn(`SECURITY: DNS lookup failed for ${hostname}: ${err.message}`);
-      throw new Error(`Failed to validate domain ${hostname}: ${err.message}`);
+      throw new Error(`Failed to validate domain ${hostname}: ${err.message}`, { cause: error });
     }
     logger.debug(`DNS resolved ${hostname} → ${addresses.map(a => a.address).join(', ')}`);
 
@@ -264,9 +264,9 @@ export async function validateImagePath(filepath: string): Promise<string> {
   } catch (error) {
     const code = errorCode(error);
     if (code === 'ENOENT') {
-      throw new Error(`Image file not found: ${filepath}`);
+      throw new Error(`Image file not found: ${filepath}`, { cause: error });
     } else if (code === 'EACCES') {
-      throw new Error(`Permission denied reading image file: ${filepath}`);
+      throw new Error(`Permission denied reading image file: ${filepath}`, { cause: error });
     }
     throw error;
   }
@@ -464,7 +464,7 @@ export async function fileToBase64(filepath: string): Promise<string> {
   } catch (error) {
     const err = toError(error);
     logger.error(`Error converting file to base64: ${err.message}`);
-    throw new Error(`Failed to read image file '${filepath}': ${err.message}`);
+    throw new Error(`Failed to read image file '${filepath}': ${err.message}`, { cause: error });
   }
 }
 
@@ -504,7 +504,7 @@ export async function urlToBase64(url: string): Promise<string> {
   } catch (error) {
     const err = toError(error);
     logger.error(`Error downloading image from URL: ${err.message}`);
-    throw new Error(`Failed to download image from '${url}': ${err.message}`);
+    throw new Error(`Failed to download image from '${url}': ${err.message}`, { cause: error });
   }
 }
 
@@ -727,7 +727,7 @@ export async function urlToBuffer(url: string): Promise<Buffer> {
   } catch (error) {
     const err = toError(error);
     logger.error(`Failed to download image from ${url}: ${err.message}`);
-    throw new Error(`Failed to download image from URL: ${err.message}`);
+    throw new Error(`Failed to download image from URL: ${err.message}`, { cause: error });
   }
 }
 

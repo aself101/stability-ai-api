@@ -93,6 +93,22 @@ describe('constructor', () => {
   });
 });
 
+describe('constructor and the shared logger', () => {
+  let saved;
+  beforeEach(() => { saved = logger.level; });
+  afterEach(() => { logger.level = saved; });
+
+  it('leaves the logger level alone unless a level is passed (it is shared module state)', () => {
+    logger.level = 'error';
+    new StabilityAPI(KEY);
+    new StabilityAPI({ apiKey: KEY });
+    expect(logger.level).toBe('error');
+
+    new StabilityAPI({ apiKey: KEY, logLevel: 'warn' });
+    expect(logger.level).toBe('warn');
+  });
+});
+
 describe('API key never reaches the logs', () => {
   it('logs only the last four characters', async () => {
     const debug = vi.spyOn(logger, 'debug');

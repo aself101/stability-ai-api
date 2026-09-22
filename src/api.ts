@@ -157,7 +157,9 @@ export class StabilityAPI {
         : { apiKey: apiKeyOrOptions ?? undefined, baseUrl, logLevel };
     const apiKey = options.apiKey ?? process.env.STABILITY_API_KEY ?? '';
     baseUrl = options.baseUrl ?? BASE_URL;
-    logLevel = options.logLevel ?? 'info';
+    // Only touch the shared logger when a level was asked for: it is module
+    // state, and a default here reset any earlier setLogLevel() for everyone.
+    logLevel = options.logLevel;
 
     // Validate base URL uses HTTPS
     if (!baseUrl.startsWith('https://')) {
@@ -306,8 +308,8 @@ export class StabilityAPI {
     if (text.length > 0) {
       try {
         data = JSON.parse(text) as Record<string, unknown>;
-      } catch {
-        throw new StabilityNetworkError(`Expected an image or JSON from ${endpoint} but received ${contentType || 'no content-type'}: ${text.slice(0, 120)}`);
+      } catch (error) {
+        throw new StabilityNetworkError(`Expected an image or JSON from ${endpoint} but received ${contentType || 'no content-type'}: ${text.slice(0, 120)}`, undefined, error);
       }
     }
     if (status === 202) {
@@ -436,7 +438,12 @@ export class StabilityAPI {
             return result;
           }
 
-          // If still in progress (HTTP 202), continue polling
+          // Still in progress: a 202 carries the task handle. Any other 2xx
+          // body is final and not an image; until 1.0 it was re-polled until
+          // the timeout and then discarded.
+          if (!isTaskResult(result)) {
+            throw new StabilityResponseError(`Task ${taskId} finished without an image`, result);
+          }
           logger.debug(`Task ${taskId} still in progress...`);
           if (spinner) {
             const timeLeft = Math.max(0, timeout - elapsed).toFixed(0);
@@ -462,8 +469,11 @@ export class StabilityAPI {
           throw new Error(`Timeout waiting for task ${taskId} after ${timeout} seconds`);
         }
 
-        // Wait before next poll
-        await new Promise(resolve => setTimeout(resolve, waitSeconds * 1000));
+        // Wait before next poll — never past the overall timeout. A large
+        // Retry-After used to be slept in full (an hour for 3600), and a value
+        // past setTimeout's 2^31-1 ms ceiling fired immediately instead.
+        const remainingMs = timeoutMs - (Date.now() - startTime);
+        await new Promise(resolve => setTimeout(resolve, Math.max(0, Math.min(waitSeconds * 1000, remainingMs))));
       }
     } finally {
       if (spinner) {
