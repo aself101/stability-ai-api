@@ -165,7 +165,9 @@ Latest SD3.5 models with three variants.
 
 **Parameters:**
 - `image` - Input image to upscale (required)
-- `prompt` - Optional guidance for upscaling
+- `prompt` - Guidance for upscaling (**required** by the API)
+- `negative_prompt` - What to avoid
+- `creativity` - How much detail may be invented (0.2-0.5, server default 0.35)
 - `seed` - Random seed (0 to 4,294,967,294)
 - `output_format` - Output format (jpeg, png, webp)
 
@@ -176,8 +178,10 @@ Latest SD3.5 models with three variants.
 
 **Parameters:**
 - `image` - Input image to upscale (required)
-- `prompt` - Optional guidance for creative upscaling
-- `creativity` - Creative freedom level (0.1-0.5, higher = more creative)
+- `prompt` - Guidance for creative upscaling (**required** by the API)
+- `negative_prompt` - What to avoid
+- `creativity` - Creative freedom level (0.1-0.5, server default 0.3, higher = more creative)
+- `style_preset` - Style preset (same 17 presets as Core)
 - `seed` - Random seed (0 to 4,294,967,294)
 - `output_format` - Output format (jpeg, png, webp)
 
@@ -611,6 +615,7 @@ console.log('Upscaled image size:', result.image.length);
 const result = await api.upscaleConservative('./photo.jpg', {
   prompt: 'enhance details and sharpness',
   negative_prompt: 'blurry, artifacts',
+  creativity: 0.25, // 0.2-0.5; lower stays closer to the original
   seed: 42,
   output_format: 'png'
 });
@@ -624,6 +629,7 @@ const result = await api.upscaleConservative('./photo.jpg', {
 const result = await api.upscaleCreative('./sketch.jpg', {
   prompt: 'photorealistic rendering with vibrant colors',
   creativity: 0.35,  // 0.1 = conservative, 0.5 = very creative
+  style_preset: 'cinematic',
   seed: 777,
   output_format: 'png'
 });
@@ -1146,7 +1152,7 @@ datasets/
     │   ├── 2025-11-17_01-20-50-180_mountain_landscape.png
     │   └── 2025-11-17_01-20-50-180_mountain_landscape_metadata.json
     ├── stable-image-core/
-    ├── sd3-large/
+    ├── sd3/
     ├── upscale-fast/
     ├── upscale-conservative/
     └── upscale-creative/
@@ -1247,7 +1253,8 @@ sai generate ultra --api-key "your-key" --prompt "test"
 - Check that aspect_ratio is from valid set (1:1, 16:9, 21:9, 2:3, 3:2, 4:5, 5:4, 9:16, 9:21)
 - Ensure seed is between 0 and 4,294,967,294
 - Verify strength (image-to-image) is between 0.0 and 1.0
-- Check creativity (Creative Upscale) is between 0.1 and 0.5
+- Check creativity is between 0.1 and 0.5 (Creative Upscale) or 0.2 and 0.5 (Conservative Upscale)
+- Conservative and Creative Upscale require `--prompt`
 
 **Rate Limit Exceeded:**
 - The service automatically retries on transient errors

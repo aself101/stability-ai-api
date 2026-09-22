@@ -26,9 +26,7 @@ export interface StabilityApiOptions {
 export type ModelEndpointKey =
   | 'stable-image-ultra'
   | 'stable-image-core'
-  | 'sd3-large'
-  | 'sd3-medium'
-  | 'sd3-large-turbo'
+  | 'sd3'
   | 'upscale-fast'
   | 'upscale-conservative'
   | 'upscale-creative'
@@ -66,6 +64,15 @@ export type EditEndpoints = {
 export type ControlEndpoints = {
   [K in ControlEndpointKey]: string;
 };
+
+/**
+ * The form fields one endpoint accepts, split by multipart part kind.
+ * `text` parts are sent as strings; `files` parts as image Blobs.
+ */
+export interface EndpointFields {
+  readonly text: readonly string[];
+  readonly files: readonly string[];
+}
 
 // ==================== MODEL CONSTRAINT TYPES ====================
 
@@ -209,16 +216,24 @@ export interface SD3Params extends BaseGenerationParams {
  * Parameters for upscale operations.
  */
 export interface UpscaleParams {
-  /** Enhancement prompt */
-  prompt?: string;
+  /**
+   * Enhancement prompt — required by both endpoints (the server answers
+   * `400 prompt: required`). Optional in the type until 1.0.
+   */
+  prompt: string;
   /** Negative prompt */
   negative_prompt?: string;
   /** Random seed */
   seed?: number;
   /** Output format */
   output_format?: string;
-  /** Creativity level for creative upscale (0.1-0.5) */
+  /**
+   * How much the upscaler may invent. Conservative: 0.2–0.5 (server default
+   * 0.35; not sent before 1.0). Creative: 0.1–0.5 (server default 0.3).
+   */
   creativity?: number;
+  /** Style preset — creative upscale only (not sent before 1.0) */
+  style_preset?: string;
   /** Wait for async result */
   wait?: boolean;
 }

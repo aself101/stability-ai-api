@@ -73,6 +73,7 @@ interface UpscaleOptions {
   seed?: number;
   outputFormat: string;
   creativity?: number;
+  stylePreset?: string;
 }
 
 interface EditOptions {
@@ -357,8 +358,9 @@ upscaleCmd
   .command('conservative')
   .description('Conservative upscaler (20-40x, minimal alteration)')
   .requiredOption('-i, --image <path>', 'Input image path')
-  .option('-p, --prompt <text>', 'Enhancement prompt')
+  .requiredOption('-p, --prompt <text>', 'Enhancement prompt (required by the API)')
   .option('-n, --negative-prompt <text>', 'Negative prompt')
+  .option('-c, --creativity <number>', 'Creativity level (0.2-0.5, server default 0.35)', parseFloat)
   .option('-s, --seed <number>', 'Random seed', parseInt)
   .option('-f, --output-format <format>', 'Output format', 'png')
   .action(async (options: UpscaleOptions, command: Command) => {
@@ -372,9 +374,10 @@ upscaleCmd
   .command('creative')
   .description('Creative upscaler (20-40x, creative reimagining, async)')
   .requiredOption('-i, --image <path>', 'Input image path')
-  .option('-p, --prompt <text>', 'Enhancement prompt')
+  .requiredOption('-p, --prompt <text>', 'Enhancement prompt (required by the API)')
   .option('-n, --negative-prompt <text>', 'Negative prompt')
-  .option('-c, --creativity <number>', 'Creativity level (0.1-0.5)', parseFloat, 0.3)
+  .option('-c, --creativity <number>', 'Creativity level (0.1-0.5, server default 0.3)', parseFloat)
+  .option('--style-preset <style>', `Style preset: ${STYLE_PRESETS.join(', ')}`)
   .option('-s, --seed <number>', 'Random seed', parseInt)
   .option('-f, --output-format <format>', 'Output format', 'png')
   .action(async (options: UpscaleOptions, command: Command) => {
@@ -767,8 +770,11 @@ async function handleUpscaleCommand(model: string, options: UpscaleOptions, glob
       output_format: options.outputFormat || 'png'
     };
 
-    if (model === 'upscale-creative') {
+    if (model === 'upscale-conservative' || model === 'upscale-creative') {
       params.creativity = options.creativity;
+    }
+    if (model === 'upscale-creative') {
+      params.style_preset = options.stylePreset;
     }
 
     // Validate parameters
@@ -797,9 +803,9 @@ async function handleUpscaleCommand(model: string, options: UpscaleOptions, glob
         if (model === 'upscale-fast') {
           result = await api.upscaleFast(options.image, params.output_format as string);
         } else if (model === 'upscale-conservative') {
-          result = await api.upscaleConservative(options.image, params);
+          result = await api.upscaleConservative(options.image, params as unknown as Parameters<typeof api.upscaleConservative>[1]);
         } else if (model === 'upscale-creative') {
-          result = await api.upscaleCreative(options.image, params) as ImageResult;
+          result = await api.upscaleCreative(options.image, params as unknown as Parameters<typeof api.upscaleCreative>[1]) as ImageResult;
         } else {
           throw new Error(`Unknown model: ${model}`);
         }

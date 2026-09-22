@@ -26,9 +26,26 @@ semantic-release from commit subjects and are kept as they were.
   `maxRetries` consecutive failures. See *Fixed* for what 0.4.0 actually did.
 - A 202 response body is parsed as JSON (`{ id, status }`). 0.4.0 returned it as a raw
   `ArrayBuffer`.
+- **Only fields the caller set are sent.** 0.4.0 filled `aspect_ratio: '1:1'`,
+  `output_format: 'png'`, `model: 'sd3.5-large'` and creative `creativity: 0.3`
+  client-side. Each equals the server default, so results do not change; the server
+  now applies its own default, which it can change without a wrapper release (bfl-api
+  DECISIONS #2). `upscaleFast(image)` still defaults its positional `outputFormat` to
+  `'png'`.
+- Every payload is built from one registry, `ENDPOINT_FIELDS` (exported from
+  `stability-ai-api/config`): the exact text and file fields each endpoint accepts.
+- **BREAKING (types) — `UpscaleParams.prompt` is required**, and
+  `upscaleConservative` / `upscaleCreative` no longer default `params` to `{}`. Both
+  endpoints answer `400 prompt: required` without it (confirmed against the server
+  2026-09-22); the methods now throw `"<operation> requires a prompt"` before any
+  request, and the CLI makes `--prompt` required for both.
 
 ### Added
 
+- Conservative upscale `creativity` (0.2–0.5, server default 0.35) — the endpoint
+  accepts it; 0.4.0 never sent it. CLI: `sai upscale conservative --creativity`.
+- Creative upscale `style_preset` — likewise accepted and never sent. CLI:
+  `sai upscale creative --style-preset`.
 - `waitForResult({ maxRetries })` — consecutive transient failures tolerated (default
   3, `0` disables). The README documented this option since 0.2; it did not exist.
 - `isTransientError(error)` — the retry classifier `waitForResult` uses.
@@ -52,6 +69,8 @@ semantic-release from commit subjects and are kept as they were.
   the IPv6 private ranges are matched as ranges: `/^fc00:/` and `/^fd00:/` let every
   other unique-local address (e.g. `fd12:3456::1`) through, and `fe80:` missed the
   rest of `fe80::/10`.
+- README: the SD3 output directory is `sd3/`, not `sd3-large/` — the CLI has always
+  named it after the `sd3` command.
 - `urlToBase64` validates its own argument. Called directly, it performed no SSRF
   check at all.
 - Image downloads enforce `MAX_DOWNLOAD_SIZE` while streaming, aborting as soon as it
@@ -60,6 +79,10 @@ semantic-release from commit subjects and are kept as they were.
 
 ### Removed
 
+- **BREAKING — `MODEL_ENDPOINTS['sd3-large' | 'sd3-medium' | 'sd3-large-turbo']`**,
+  replaced by one `MODEL_ENDPOINTS['sd3']`. All three pointed at the same URL; the SD3.5
+  variant is the `model` form field. The old keys read as the SD3.0 model IDs Stability
+  retired in April 2025.
 - semantic-release, its workflow and configuration. Releases are manual.
 
 # [0.4.0](https://github.com/aself101/stability-ai-api/compare/v0.3.1...v0.4.0) (2025-12-03)

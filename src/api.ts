@@ -16,7 +16,7 @@
 
 import { logger, buildFormData, createSpinner } from './utils.js';
 import { request, requestJson, StabilityHttpError, StabilityNetworkError, StabilityTimeoutError } from './http.js';
-import { BASE_URL, MODEL_ENDPOINTS, EDIT_ENDPOINTS, CONTROL_ENDPOINTS, DEFAULT_POLL_INTERVAL, DEFAULT_TIMEOUT, MAX_RETRIES } from './config.js';
+import { BASE_URL, MODEL_ENDPOINTS, EDIT_ENDPOINTS, CONTROL_ENDPOINTS, ENDPOINT_FIELDS, DEFAULT_POLL_INTERVAL, DEFAULT_TIMEOUT, MAX_RETRIES } from './config.js';
 import type {
   ImageResult,
   TaskResult,
@@ -59,6 +59,17 @@ export function isTransientError(error: unknown): boolean {
   if (error instanceof StabilityHttpError) return TRANSIENT_STATUSES.has(error.status);
   if (error instanceof StabilityNetworkError) return error.retryable;
   return error instanceof StabilityTimeoutError;
+}
+
+/**
+ * Fail before any network call when an endpoint's required prompt is missing.
+ * The server answers `400 prompt: required` anyway (confirmed 2026-09-22 for
+ * both upscalers); this makes the message say which method needed it.
+ */
+function requirePrompt(prompt: string | undefined, operation: string): void {
+  if (typeof prompt !== 'string' || prompt.trim() === '') {
+    throw new Error(`${operation} requires a prompt`);
+  }
 }
 
 /**
@@ -242,6 +253,34 @@ export class StabilityAPI {
   }
 
   /**
+   * Build and send one generation request from the endpoint's field registry.
+   *
+   * Only fields listed in `ENDPOINT_FIELDS[path]` are read from `values` /
+   * `files`; everything else is ignored, and `undefined`/`null` values are
+   * skipped so the server's own default applies. Falsy values that were set
+   * (`0`, `false`, `''`) are sent. The registry is what the spec-drift check
+   * compares against the live API, so it is the single definition of what
+   * this wrapper can send (bfl-api DECISIONS #2).
+   *
+   * @throws Error if `path` has no registry entry (a wiring bug, not a caller error)
+   */
+  private async _submit(
+    path: string,
+    values: object,
+    files: Record<string, string | Buffer | undefined> = {}
+  ): Promise<ImageResult | TaskResult | Record<string, unknown>> {
+    const fields = ENDPOINT_FIELDS[path];
+    if (!fields) {
+      throw new Error(`No ENDPOINT_FIELDS entry for ${path}`);
+    }
+    const source = values as Record<string, unknown>;
+    const text = Object.fromEntries(fields.text.map(f => [f, source[f]]));
+    const fileParts = Object.fromEntries(fields.files.map(f => [f, files[f]]));
+    const formData = await buildFormData(text, fileParts);
+    return await this._makeFormDataRequest('POST', path, formData);
+  }
+
+  /**
    * Poll for async task result.
    *
    * @param taskId - Task ID from async operation
@@ -351,22 +390,7 @@ export class StabilityAPI {
   async generateUltra(params: UltraParams): Promise<ImageResult> {
     logger.info('Generating image with Stable Image Ultra');
 
-    const formData = await buildFormData(
-      {
-        prompt: params.prompt,
-        negative_prompt: params.negative_prompt,
-        aspect_ratio: params.aspect_ratio || '1:1',
-        seed: params.seed,
-        output_format: params.output_format || 'png'
-      },
-      params.image ? { image: params.image } : {}
-    );
-
-    if (params.strength !== undefined) {
-      formData.append('strength', String(params.strength));
-    }
-
-    return await this._makeFormDataRequest('POST', MODEL_ENDPOINTS['stable-image-ultra'], formData) as ImageResult;
+    return await this._submit(MODEL_ENDPOINTS['stable-image-ultra'], params, { image: params.image }) as ImageResult;
   }
 
   /**
@@ -382,16 +406,7 @@ export class StabilityAPI {
   async generateCore(params: CoreParams): Promise<ImageResult> {
     logger.info('Generating image with Stable Image Core');
 
-    const formData = await buildFormData({
-      prompt: params.prompt,
-      negative_prompt: params.negative_prompt,
-      aspect_ratio: params.aspect_ratio || '1:1',
-      seed: params.seed,
-      output_format: params.output_format || 'png',
-      style_preset: params.style_preset
-    });
-
-    return await this._makeFormDataRequest('POST', MODEL_ENDPOINTS['stable-image-core'], formData) as ImageResult;
+    return await this._submit(MODEL_ENDPOINTS['stable-image-core'], params) as ImageResult;
   }
 
   /**
@@ -404,18 +419,9 @@ export class StabilityAPI {
    * const result = await api.generateSD3({ prompt: 'a bird', model: 'sd3.5-large-turbo' });
    */
   async generateSD3(params: SD3Params): Promise<ImageResult> {
-    logger.info(`Generating image with SD 3.5 (${params.model || 'sd3.5-large'})`);
+    logger.info(`Generating image with SD 3.5 (${params.model ?? 'server default: sd3.5-large'})`);
 
-    const formData = await buildFormData({
-      prompt: params.prompt,
-      model: params.model || 'sd3.5-large',
-      negative_prompt: params.negative_prompt,
-      aspect_ratio: params.aspect_ratio || '1:1',
-      seed: params.seed,
-      output_format: params.output_format || 'png'
-    });
-
-    return await this._makeFormDataRequest('POST', MODEL_ENDPOINTS['sd3-large'], formData) as ImageResult;
+    return await this._submit(MODEL_ENDPOINTS['sd3'], params) as ImageResult;
   }
 
   /**
@@ -431,12 +437,7 @@ export class StabilityAPI {
   async upscaleFast(imagePath: string, outputFormat = 'png'): Promise<ImageResult> {
     logger.info('Upscaling image with Fast Upscaler');
 
-    const formData = await buildFormData(
-      { output_format: outputFormat },
-      { image: imagePath }
-    );
-
-    return await this._makeFormDataRequest('POST', MODEL_ENDPOINTS['upscale-fast'], formData) as ImageResult;
+    return await this._submit(MODEL_ENDPOINTS['upscale-fast'], { output_format: outputFormat }, { image: imagePath }) as ImageResult;
   }
 
   /**
@@ -449,20 +450,11 @@ export class StabilityAPI {
    * @example
    * const result = await api.upscaleConservative('/path/to/image.png', { prompt: 'enhance details' });
    */
-  async upscaleConservative(imagePath: string, params: UpscaleParams = {}): Promise<ImageResult> {
+  async upscaleConservative(imagePath: string, params: UpscaleParams): Promise<ImageResult> {
     logger.info('Upscaling image with Conservative Upscaler');
 
-    const formData = await buildFormData(
-      {
-        prompt: params.prompt,
-        negative_prompt: params.negative_prompt,
-        seed: params.seed,
-        output_format: params.output_format || 'png'
-      },
-      { image: imagePath }
-    );
-
-    return await this._makeFormDataRequest('POST', MODEL_ENDPOINTS['upscale-conservative'], formData) as ImageResult;
+    requirePrompt(params?.prompt, 'Conservative upscale');
+    return await this._submit(MODEL_ENDPOINTS['upscale-conservative'], params, { image: imagePath }) as ImageResult;
   }
 
   /**
@@ -475,21 +467,11 @@ export class StabilityAPI {
    * @example
    * const result = await api.upscaleCreative('/path/to/image.png', { creativity: 0.4 });
    */
-  async upscaleCreative(imagePath: string, params: UpscaleParams = {}): Promise<ImageResult | TaskResult> {
+  async upscaleCreative(imagePath: string, params: UpscaleParams): Promise<ImageResult | TaskResult> {
     logger.info('Upscaling image with Creative Upscaler (async)');
 
-    const formData = await buildFormData(
-      {
-        prompt: params.prompt,
-        negative_prompt: params.negative_prompt,
-        creativity: params.creativity || 0.3,
-        seed: params.seed,
-        output_format: params.output_format || 'png'
-      },
-      { image: imagePath }
-    );
-
-    const task = await this._makeFormDataRequest('POST', MODEL_ENDPOINTS['upscale-creative'], formData);
+    requirePrompt(params?.prompt, 'Creative upscale');
+    const task = await this._submit(MODEL_ENDPOINTS['upscale-creative'], params, { image: imagePath });
 
     // If wait is enabled (default), poll for result
     const taskWithId = task as { id?: string };
@@ -549,21 +531,7 @@ export class StabilityAPI {
   async erase(image: string, options: EraseParams = {}): Promise<ImageResult> {
     logger.info('Erasing objects from image');
 
-    const fileInputs: Record<string, string | undefined> = { image };
-    if (options.mask) {
-      fileInputs.mask = options.mask;
-    }
-
-    const formData = await buildFormData(
-      {
-        grow_mask: options.grow_mask,
-        seed: options.seed,
-        output_format: options.output_format || 'png'
-      },
-      fileInputs
-    );
-
-    return await this._makeFormDataRequest('POST', EDIT_ENDPOINTS['erase'], formData) as ImageResult;
+    return await this._submit(EDIT_ENDPOINTS['erase'], options, { image, mask: options.mask }) as ImageResult;
   }
 
   /**
@@ -580,24 +548,7 @@ export class StabilityAPI {
   async inpaint(image: string, prompt: string, options: InpaintParams = {}): Promise<ImageResult> {
     logger.info('Inpainting image with prompt');
 
-    const fileInputs: Record<string, string | undefined> = { image };
-    if (options.mask) {
-      fileInputs.mask = options.mask;
-    }
-
-    const formData = await buildFormData(
-      {
-        prompt,
-        negative_prompt: options.negative_prompt,
-        grow_mask: options.grow_mask,
-        seed: options.seed,
-        output_format: options.output_format || 'png',
-        style_preset: options.style_preset
-      },
-      fileInputs
-    );
-
-    return await this._makeFormDataRequest('POST', EDIT_ENDPOINTS['inpaint'], formData) as ImageResult;
+    return await this._submit(EDIT_ENDPOINTS['inpaint'], { ...options, prompt }, { image, mask: options.mask }) as ImageResult;
   }
 
   /**
@@ -614,22 +565,7 @@ export class StabilityAPI {
   async outpaint(image: string, options: OutpaintParams = {}): Promise<ImageResult> {
     logger.info('Outpainting image');
 
-    const formData = await buildFormData(
-      {
-        left: options.left,
-        right: options.right,
-        up: options.up,
-        down: options.down,
-        creativity: options.creativity,
-        prompt: options.prompt,
-        seed: options.seed,
-        output_format: options.output_format || 'png',
-        style_preset: options.style_preset
-      },
-      { image }
-    );
-
-    return await this._makeFormDataRequest('POST', EDIT_ENDPOINTS['outpaint'], formData) as ImageResult;
+    return await this._submit(EDIT_ENDPOINTS['outpaint'], options, { image }) as ImageResult;
   }
 
   /**
@@ -647,20 +583,7 @@ export class StabilityAPI {
   async searchAndReplace(image: string, prompt: string, searchPrompt: string, options: SearchAndReplaceParams = {}): Promise<ImageResult> {
     logger.info(`Searching for "${searchPrompt}" and replacing with "${prompt}"`);
 
-    const formData = await buildFormData(
-      {
-        prompt,
-        search_prompt: searchPrompt,
-        negative_prompt: options.negative_prompt,
-        grow_mask: options.grow_mask,
-        seed: options.seed,
-        output_format: options.output_format || 'png',
-        style_preset: options.style_preset
-      },
-      { image }
-    );
-
-    return await this._makeFormDataRequest('POST', EDIT_ENDPOINTS['search-and-replace'], formData) as ImageResult;
+    return await this._submit(EDIT_ENDPOINTS['search-and-replace'], { ...options, prompt, search_prompt: searchPrompt }, { image }) as ImageResult;
   }
 
   /**
@@ -678,20 +601,7 @@ export class StabilityAPI {
   async searchAndRecolor(image: string, prompt: string, selectPrompt: string, options: SearchAndRecolorParams = {}): Promise<ImageResult> {
     logger.info(`Searching for "${selectPrompt}" and recoloring to "${prompt}"`);
 
-    const formData = await buildFormData(
-      {
-        prompt,
-        select_prompt: selectPrompt,
-        negative_prompt: options.negative_prompt,
-        grow_mask: options.grow_mask,
-        seed: options.seed,
-        output_format: options.output_format || 'png',
-        style_preset: options.style_preset
-      },
-      { image }
-    );
-
-    return await this._makeFormDataRequest('POST', EDIT_ENDPOINTS['search-and-recolor'], formData) as ImageResult;
+    return await this._submit(EDIT_ENDPOINTS['search-and-recolor'], { ...options, prompt, select_prompt: selectPrompt }, { image }) as ImageResult;
   }
 
   /**
@@ -710,17 +620,11 @@ export class StabilityAPI {
     logger.info('Removing background from image');
 
     // Remove background doesn't support jpeg (needs transparency)
-    const outputFormat = options.output_format || 'png';
-    if (outputFormat === 'jpeg') {
+    if (options.output_format === 'jpeg') {
       throw new Error('Remove background does not support jpeg output format (requires transparency). Use png or webp.');
     }
 
-    const formData = await buildFormData(
-      { output_format: outputFormat },
-      { image }
-    );
-
-    return await this._makeFormDataRequest('POST', EDIT_ENDPOINTS['remove-background'], formData) as ImageResult;
+    return await this._submit(EDIT_ENDPOINTS['remove-background'], options, { image }) as ImageResult;
   }
 
   /**
@@ -751,33 +655,11 @@ export class StabilityAPI {
       throw new Error('light_source_strength requires either light_reference or light_source_direction');
     }
 
-    const fileInputs: Record<string, string | undefined> = { subject_image: subjectImage };
-    if (options.background_reference) {
-      fileInputs.background_reference = options.background_reference;
-    }
-    if (options.light_reference) {
-      fileInputs.light_reference = options.light_reference;
-    }
-
-    const formData = await buildFormData(
-      {
-        background_prompt: options.background_prompt,
-        foreground_prompt: options.foreground_prompt,
-        negative_prompt: options.negative_prompt,
-        preserve_original_subject: options.preserve_original_subject,
-        original_background_depth: options.original_background_depth,
-        keep_original_background: options.keep_original_background !== undefined
-          ? String(options.keep_original_background)
-          : undefined,
-        light_source_direction: options.light_source_direction,
-        light_source_strength: options.light_source_strength,
-        seed: options.seed,
-        output_format: options.output_format || 'png'
-      },
-      fileInputs
-    );
-
-    const task = await this._makeFormDataRequest('POST', EDIT_ENDPOINTS['replace-background-and-relight'], formData);
+    const task = await this._submit(EDIT_ENDPOINTS['replace-background-and-relight'], options, {
+      subject_image: subjectImage,
+      background_reference: options.background_reference,
+      light_reference: options.light_reference,
+    });
 
     // If wait is enabled (default), poll for result
     const taskWithId = task as { id?: string };
@@ -808,19 +690,7 @@ export class StabilityAPI {
   async controlSketch(image: string, prompt: string, options: ControlSketchParams = {}): Promise<ImageResult> {
     logger.info('Generating from sketch with Control: Sketch');
 
-    const formData = await buildFormData(
-      {
-        prompt,
-        control_strength: options.control_strength,
-        negative_prompt: options.negative_prompt,
-        seed: options.seed,
-        output_format: options.output_format || 'png',
-        style_preset: options.style_preset
-      },
-      { image }
-    );
-
-    return await this._makeFormDataRequest('POST', CONTROL_ENDPOINTS['sketch'], formData) as ImageResult;
+    return await this._submit(CONTROL_ENDPOINTS['sketch'], { ...options, prompt }, { image }) as ImageResult;
   }
 
   /**
@@ -840,19 +710,7 @@ export class StabilityAPI {
   async controlStructure(image: string, prompt: string, options: ControlStructureParams = {}): Promise<ImageResult> {
     logger.info('Generating with structure preservation with Control: Structure');
 
-    const formData = await buildFormData(
-      {
-        prompt,
-        control_strength: options.control_strength,
-        negative_prompt: options.negative_prompt,
-        seed: options.seed,
-        output_format: options.output_format || 'png',
-        style_preset: options.style_preset
-      },
-      { image }
-    );
-
-    return await this._makeFormDataRequest('POST', CONTROL_ENDPOINTS['structure'], formData) as ImageResult;
+    return await this._submit(CONTROL_ENDPOINTS['structure'], { ...options, prompt }, { image }) as ImageResult;
   }
 
   /**
@@ -872,20 +730,7 @@ export class StabilityAPI {
   async controlStyle(image: string, prompt: string, options: ControlStyleParams = {}): Promise<ImageResult> {
     logger.info('Generating with style guidance with Control: Style');
 
-    const formData = await buildFormData(
-      {
-        prompt,
-        fidelity: options.fidelity,
-        aspect_ratio: options.aspect_ratio,
-        negative_prompt: options.negative_prompt,
-        seed: options.seed,
-        output_format: options.output_format || 'png',
-        style_preset: options.style_preset
-      },
-      { image }
-    );
-
-    return await this._makeFormDataRequest('POST', CONTROL_ENDPOINTS['style'], formData) as ImageResult;
+    return await this._submit(CONTROL_ENDPOINTS['style'], { ...options, prompt }, { image }) as ImageResult;
   }
 
   /**
@@ -908,20 +753,7 @@ export class StabilityAPI {
   async controlStyleTransfer(initImage: string, styleImage: string, options: ControlStyleTransferParams = {}): Promise<ImageResult> {
     logger.info('Transferring style between images with Control: Style Transfer');
 
-    const formData = await buildFormData(
-      {
-        prompt: options.prompt,
-        negative_prompt: options.negative_prompt,
-        style_strength: options.style_strength,
-        composition_fidelity: options.composition_fidelity,
-        change_strength: options.change_strength,
-        seed: options.seed,
-        output_format: options.output_format || 'png'
-      },
-      { init_image: initImage, style_image: styleImage }
-    );
-
-    return await this._makeFormDataRequest('POST', CONTROL_ENDPOINTS['style-transfer'], formData) as ImageResult;
+    return await this._submit(CONTROL_ENDPOINTS['style-transfer'], options, { init_image: initImage, style_image: styleImage }) as ImageResult;
   }
 }
 

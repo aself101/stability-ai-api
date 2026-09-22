@@ -7,6 +7,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   BASE_URL,
   MODEL_ENDPOINTS,
+  ENDPOINT_FIELDS,
   EDIT_ENDPOINTS,
   EDIT_CONSTRAINTS,
   CONTROL_ENDPOINTS,
@@ -53,16 +54,39 @@ describe('Configuration Constants', () => {
     });
   });
 
+  describe('ENDPOINT_FIELDS registry', () => {
+    const submitPaths = [
+      ...Object.entries(MODEL_ENDPOINTS).filter(([k]) => k !== 'results').map(([, p]) => p),
+      ...Object.values(EDIT_ENDPOINTS),
+      ...Object.values(CONTROL_ENDPOINTS),
+    ];
+
+    it('has an entry for every submit endpoint, and nothing else', () => {
+      expect(submitPaths).toHaveLength(17);
+      expect(Object.keys(ENDPOINT_FIELDS).sort()).toEqual([...submitPaths].sort());
+    });
+
+    it('declares every field once, never as both text and file', () => {
+      for (const [path, { text, files }] of Object.entries(ENDPOINT_FIELDS)) {
+        const all = [...text, ...files];
+        expect(new Set(all).size, path).toBe(all.length);
+      }
+    });
+  });
+
   describe('Model Endpoints', () => {
-    it('should have all endpoints defined', () => {
-      expect(MODEL_ENDPOINTS).toBeDefined();
-      expect(Object.keys(MODEL_ENDPOINTS).length).toBeGreaterThanOrEqual(9);
+    it('should have exactly the model endpoint keys', () => {
+      // One 'sd3' key since 1.0 — the variant is the `model` form field.
+      expect(Object.keys(MODEL_ENDPOINTS).sort()).toEqual([
+        'results', 'sd3', 'stable-image-core', 'stable-image-ultra',
+        'upscale-conservative', 'upscale-creative', 'upscale-fast',
+      ]);
     });
 
     it('should have generate endpoints', () => {
       expect(MODEL_ENDPOINTS['stable-image-ultra']).toBe('/v2beta/stable-image/generate/ultra');
       expect(MODEL_ENDPOINTS['stable-image-core']).toBe('/v2beta/stable-image/generate/core');
-      expect(MODEL_ENDPOINTS['sd3-large']).toBe('/v2beta/stable-image/generate/sd3');
+      expect(MODEL_ENDPOINTS['sd3']).toBe('/v2beta/stable-image/generate/sd3');
     });
 
     it('should have upscale endpoints', () => {

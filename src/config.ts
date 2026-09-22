@@ -23,6 +23,7 @@ import type {
   ModelEndpoints,
   EditEndpoints,
   ControlEndpoints,
+  EndpointFields,
   ModelConstraints,
   EditConstraints,
   ControlConstraints,
@@ -52,9 +53,10 @@ export const MODEL_ENDPOINTS: ModelEndpoints = {
   // Generate endpoints (all synchronous)
   'stable-image-ultra': '/v2beta/stable-image/generate/ultra',
   'stable-image-core': '/v2beta/stable-image/generate/core',
-  'sd3-large': '/v2beta/stable-image/generate/sd3',
-  'sd3-medium': '/v2beta/stable-image/generate/sd3',
-  'sd3-large-turbo': '/v2beta/stable-image/generate/sd3',
+  // One endpoint serves every SD3.5 variant; the variant is the `model` field.
+  // Until 1.0 this map carried 'sd3-large' / 'sd3-medium' / 'sd3-large-turbo'
+  // keys, all pointing here — which read as retired SD3.0 model IDs.
+  'sd3': '/v2beta/stable-image/generate/sd3',
 
   // Upscale endpoints
   'upscale-fast': '/v2beta/stable-image/upscale/fast', // synchronous
@@ -63,6 +65,94 @@ export const MODEL_ENDPOINTS: ModelEndpoints = {
 
   // Results endpoint for async operations
   'results': '/v2beta/results'
+};
+
+/**
+ * Every form field each endpoint accepts, keyed by path — the single source for
+ * what the wrapper can send.
+ *
+ * Payload builders go through `StabilityAPI._submit`, which reads ONLY the
+ * fields listed here (undefined values are skipped: the server's default applies).
+ * `scripts/check-spec-drift.ts` requires each entry to equal the live OpenAPI
+ * request schema's property set exactly, so a field the API adds or drops fails
+ * CI rather than going unnoticed. Mirrors bfl-api's MODEL_FIELDS (its DECISIONS
+ * #2 and #6).
+ *
+ * Order is the order parts are written into the multipart body.
+ */
+export const ENDPOINT_FIELDS: Readonly<Record<string, EndpointFields>> = {
+  '/v2beta/stable-image/generate/ultra': {
+    text: ['prompt', 'negative_prompt', 'aspect_ratio', 'seed', 'output_format', 'strength'],
+    files: ['image'],
+  },
+  '/v2beta/stable-image/generate/core': {
+    text: ['prompt', 'negative_prompt', 'aspect_ratio', 'seed', 'output_format', 'style_preset'],
+    files: [],
+  },
+  '/v2beta/stable-image/generate/sd3': {
+    text: ['prompt', 'model', 'negative_prompt', 'aspect_ratio', 'seed', 'output_format'],
+    files: [],
+  },
+  '/v2beta/stable-image/upscale/fast': {
+    text: ['output_format'],
+    files: ['image'],
+  },
+  '/v2beta/stable-image/upscale/conservative': {
+    text: ['prompt', 'negative_prompt', 'creativity', 'seed', 'output_format'],
+    files: ['image'],
+  },
+  '/v2beta/stable-image/upscale/creative': {
+    text: ['prompt', 'negative_prompt', 'creativity', 'seed', 'output_format', 'style_preset'],
+    files: ['image'],
+  },
+  '/v2beta/stable-image/edit/erase': {
+    text: ['grow_mask', 'seed', 'output_format'],
+    files: ['image', 'mask'],
+  },
+  '/v2beta/stable-image/edit/inpaint': {
+    text: ['prompt', 'negative_prompt', 'grow_mask', 'seed', 'output_format', 'style_preset'],
+    files: ['image', 'mask'],
+  },
+  '/v2beta/stable-image/edit/outpaint': {
+    text: ['left', 'right', 'up', 'down', 'creativity', 'prompt', 'seed', 'output_format', 'style_preset'],
+    files: ['image'],
+  },
+  '/v2beta/stable-image/edit/search-and-replace': {
+    text: ['prompt', 'search_prompt', 'negative_prompt', 'grow_mask', 'seed', 'output_format', 'style_preset'],
+    files: ['image'],
+  },
+  '/v2beta/stable-image/edit/search-and-recolor': {
+    text: ['prompt', 'select_prompt', 'negative_prompt', 'grow_mask', 'seed', 'output_format', 'style_preset'],
+    files: ['image'],
+  },
+  '/v2beta/stable-image/edit/remove-background': {
+    text: ['output_format'],
+    files: ['image'],
+  },
+  '/v2beta/stable-image/edit/replace-background-and-relight': {
+    text: [
+      'background_prompt', 'foreground_prompt', 'negative_prompt', 'preserve_original_subject',
+      'original_background_depth', 'keep_original_background', 'light_source_direction',
+      'light_source_strength', 'seed', 'output_format',
+    ],
+    files: ['subject_image', 'background_reference', 'light_reference'],
+  },
+  '/v2beta/stable-image/control/sketch': {
+    text: ['prompt', 'control_strength', 'negative_prompt', 'seed', 'output_format', 'style_preset'],
+    files: ['image'],
+  },
+  '/v2beta/stable-image/control/structure': {
+    text: ['prompt', 'control_strength', 'negative_prompt', 'seed', 'output_format', 'style_preset'],
+    files: ['image'],
+  },
+  '/v2beta/stable-image/control/style': {
+    text: ['prompt', 'negative_prompt', 'aspect_ratio', 'fidelity', 'seed', 'output_format', 'style_preset'],
+    files: ['image'],
+  },
+  '/v2beta/stable-image/control/style-transfer': {
+    text: ['prompt', 'negative_prompt', 'seed', 'style_strength', 'composition_fidelity', 'change_strength', 'output_format'],
+    files: ['init_image', 'style_image'],
+  },
 };
 
 // Valid aspect ratios for generate endpoints
@@ -233,7 +323,8 @@ export const MODEL_CONSTRAINTS: ModelConstraints = {
   'upscale-conservative': {
     promptMaxLength: 10000,
     outputFormats: OUTPUT_FORMATS,
-    seed: { min: 0, max: 4294967294 }
+    seed: { min: 0, max: 4294967294 },
+    creativity: { min: 0.2, max: 0.5 }
   },
   'upscale-creative': {
     promptMaxLength: 10000,
