@@ -42,6 +42,12 @@ the reasoning behind each change is in `docs/DECISIONS.md`.
   `stability-ai-api/config`): the exact text and file fields each endpoint accepts.
 - `sai generate sd3` no longer defaults `--aspect-ratio` to `1:1`. The server default is
   the same, and a client default would make every image-to-image call invalid.
+- **Responses are checked, not cast.** The 15 synchronous methods verify that the
+  response is an image (`isImageResult`) and throw `StabilityResponseError` (with the
+  parsed `body`) when a 2xx carries anything else; 0.4.0 cast it to `ImageResult` and
+  returned an object whose `.image` was `undefined`. A 202 without a string task `id`,
+  an async endpoint answering neither a task nor an image, and a balance response
+  without numeric `credits` throw the same error.
 - **BREAKING (types) — `UpscaleParams.prompt` is required**, and
   `upscaleConservative` / `upscaleCreative` no longer default `params` to `{}`. Both
   endpoints answer `400 prompt: required` without it (confirmed against the server
@@ -50,6 +56,13 @@ the reasoning behind each change is in `docs/DECISIONS.md`.
 
 ### Added
 
+- `new StabilityAPI()` with no arguments uses `STABILITY_API_KEY`, and
+  `new StabilityAPI({ apiKey, baseUrl, logLevel })` takes the `StabilityApiOptions`
+  object (the type was exported in 0.4.0 but the constructor ignored it). The positional
+  form is unchanged. The README has shown both forms since 0.2; in 0.4.0 the first
+  failed on the first request and the second stored `"[object Object]"` as the key.
+- `StabilityResponseError`, `isImageResult`, `isTaskResult` (package root);
+  `toError`, `errorCode` (`stability-ai-api/utils`).
 - `npm run check:spec` (`scripts/check-spec-drift.ts`): compares `ENDPOINT_FIELDS` and the
   constraint tables with Stability's live OpenAPI spec — every field, part kind (text vs
   file), range, enum and prompt length — and fails on drift. `--control` seeds seven
@@ -83,6 +96,18 @@ the reasoning behind each change is in `docs/DECISIONS.md`.
 
 ### Fixed
 
+- **`--output-format webp` saved corrupt files.** `writeToFile` treated only
+  .png/.jpg/.jpeg as binary, so a .webp image was written as `String(buffer)` —
+  UTF-8 decoded, the bytes mangled. A Buffer is now always written as binary, and
+  `readFromFile` reads .webp/.gif as binary. Present since at least 0.4.0; found by
+  a 1.0 test of the CLI's save path.
+- README: the "Exported Types" example imported names that do not exist
+  (`UpscaleFastParams`, `EditEraseParams`, …) and claimed enum values are checked at
+  compile time (they are `string`, checked at runtime by the validators). It now lists
+  the real exports and documents the `./config` and `./utils` subpaths.
+- `validateImageUrl` no longer tells its own "resolves to internal" error from a DNS
+  failure by matching the message text; only the lookup sits inside the try.
+- `writeToFile` / `readFromFile` name themselves in the "filepath is required" error.
 - **Ultra image-to-image timed out.** API calls had a 30 s timeout, and synchronous
   endpoints send nothing until the image is done; Ultra image-to-image took longer in
   the 1.0 live battery. The client gave up on a request the server may still have

@@ -33,6 +33,9 @@ export const MAX_DOWNLOAD_SIZE = 50 * 1024 * 1024;
  */
 export const DOWNLOAD_TIMEOUT_MS = 60000;
 
+/** Extensions `writeToFile`/`readFromFile` treat as binary in auto mode. */
+const BINARY_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif']);
+
 /** Maximum number of redirects allowed when fetching URLs */
 export const MAX_REDIRECTS = 5;
 
@@ -49,6 +52,30 @@ const logger = winston.createLogger({
     new winston.transports.Console()
   ]
 });
+
+/**
+ * Narrow a caught value to an Error. Strict mode types `catch (error)` as
+ * `unknown` because JavaScript can throw anything; asserting `error as Error`
+ * (the pre-1.0 convention, at ~22 sites) turns a thrown string into an object
+ * whose `.message` is undefined.
+ */
+export function toError(value: unknown): Error {
+  if (value instanceof Error) return value;
+  if (typeof value === 'string') return new Error(value);
+  try {
+    return new Error(JSON.stringify(value) ?? String(value));
+  } catch {
+    return new Error(String(value));
+  }
+}
+
+/** The `code` of a Node system error (ENOENT, ENOTFOUND, …), if the value has one. */
+export function errorCode(value: unknown): string | undefined {
+  if (typeof value === 'object' && value !== null && 'code' in value && typeof value.code === 'string') {
+    return value.code;
+  }
+  return undefined;
+}
 
 /**
  * Check if an IP address is blocked (private, localhost, or cloud metadata).
@@ -171,35 +198,35 @@ export async function validateImageUrl(url: string): Promise<string> {
       throw new Error('Access to internal/private IP addresses is not allowed');
     }
   } else {
-    // Hostname is a domain name - perform DNS resolution to prevent DNS rebinding
+    // Hostname is a domain name - perform DNS resolution to prevent DNS rebinding.
+    // Only the lookup sits inside the try: until 1.0 the blocked-address check
+    // did too, and the catch told its own error apart from a DNS failure by
+    // matching the message text 'resolves to internal'.
+    logger.debug(`Resolving DNS for hostname: ${hostname}`);
+    let addresses: { address: string }[];
     try {
-      logger.debug(`Resolving DNS for hostname: ${hostname}`);
       // Every address, not the first: a name with one public and one private
       // record passed a first-address check, and the client may connect to
       // either.
-      const addresses = await lookup(hostname, { all: true });
-      logger.debug(`DNS resolved ${hostname} → ${addresses.map(a => a.address).join(', ')}`);
-
-      const blocked = addresses.find(a => isBlockedIP(a.address));
-      if (blocked) {
-        logger.warn(`SECURITY: DNS resolution of ${hostname} points to blocked IP: ${blocked.address}`);
-        throw new Error(`Domain ${hostname} resolves to internal/private IP address`);
-      }
-
-      logger.debug(`DNS validation passed for ${hostname}`);
+      addresses = await lookup(hostname, { all: true });
     } catch (error) {
-      const err = error as NodeJS.ErrnoException;
-      if (err.code === 'ENOTFOUND') {
+      if (errorCode(error) === 'ENOTFOUND') {
         logger.warn(`SECURITY: Domain ${hostname} could not be resolved`);
         throw new Error(`Domain ${hostname} could not be resolved`);
-      } else if (err.message && err.message.includes('resolves to internal')) {
-        // Re-throw our own validation error
-        throw error;
-      } else {
-        logger.warn(`SECURITY: DNS lookup failed for ${hostname}: ${err.message}`);
-        throw new Error(`Failed to validate domain ${hostname}: ${err.message}`);
       }
+      const err = toError(error);
+      logger.warn(`SECURITY: DNS lookup failed for ${hostname}: ${err.message}`);
+      throw new Error(`Failed to validate domain ${hostname}: ${err.message}`);
     }
+    logger.debug(`DNS resolved ${hostname} → ${addresses.map(a => a.address).join(', ')}`);
+
+    const blocked = addresses.find(a => isBlockedIP(a.address));
+    if (blocked) {
+      logger.warn(`SECURITY: DNS resolution of ${hostname} points to blocked IP: ${blocked.address}`);
+      throw new Error(`Domain ${hostname} resolves to internal/private IP address`);
+    }
+
+    logger.debug(`DNS validation passed for ${hostname}`);
   }
 
   return url;
@@ -235,10 +262,10 @@ export async function validateImagePath(filepath: string): Promise<string> {
 
     return filepath;
   } catch (error) {
-    const err = error as NodeJS.ErrnoException;
-    if (err.code === 'ENOENT') {
+    const code = errorCode(error);
+    if (code === 'ENOENT') {
       throw new Error(`Image file not found: ${filepath}`);
-    } else if (err.code === 'EACCES') {
+    } else if (code === 'EACCES') {
       throw new Error(`Permission denied reading image file: ${filepath}`);
     }
     throw error;
@@ -278,8 +305,9 @@ export function validateImageFile(filepath: string, constraints: ImageValidation
     }
 
   } catch (error) {
-    const err = error as NodeJS.ErrnoException;
-    if (err.code === 'ENOENT') {
+    const err = toError(error);
+    const code = errorCode(error);
+    if (code === 'ENOENT') {
       errors.push(`Image file not found: ${filepath}`);
     } else {
       errors.push(`Error validating image file: ${err.message}`);
@@ -301,7 +329,7 @@ export async function ensureDirectory(dirPath: string): Promise<void> {
   try {
     await fs.mkdir(dirPath, { recursive: true });
   } catch (error) {
-    const err = error as Error;
+    const err = toError(error);
     logger.error(`Error creating directory ${dirPath}: ${err.message}`);
     throw error;
   }
@@ -318,7 +346,7 @@ export async function ensureDirectory(dirPath: string): Promise<void> {
  */
 export async function writeToFile(data: unknown, filepath: string, fileFormat: FileFormat = 'auto'): Promise<void> {
   if (!filepath) {
-    throw new Error('Filepath is required');
+    throw new Error('writeToFile: filepath is required');
   }
 
   try {
@@ -332,7 +360,10 @@ export async function writeToFile(data: unknown, filepath: string, fileFormat: F
       const ext = path.extname(filepath).toLowerCase();
       if (ext === '.json') {
         format = 'json';
-      } else if (ext === '.png' || ext === '.jpg' || ext === '.jpeg') {
+      } else if (Buffer.isBuffer(data) || BINARY_EXTENSIONS.has(ext)) {
+        // A Buffer is binary whatever the extension. Until 1.0 only .png/.jpg/
+        // .jpeg were, so a .webp image fell through to the text branch and was
+        // UTF-8 decoded — every `--output-format webp` save wrote a corrupt file.
         format = 'binary';
       } else {
         format = 'txt';
@@ -352,7 +383,7 @@ export async function writeToFile(data: unknown, filepath: string, fileFormat: F
 
     logger.debug(`Successfully wrote data to ${filepath}`);
   } catch (error) {
-    const err = error as Error;
+    const err = toError(error);
     logger.error(`Error writing to file ${filepath}: ${err.message}`);
     throw error;
   }
@@ -369,7 +400,7 @@ export async function writeToFile(data: unknown, filepath: string, fileFormat: F
  */
 export async function readFromFile(filepath: string, fileFormat: FileFormat = 'auto'): Promise<unknown> {
   if (!filepath) {
-    throw new Error('Filepath is required');
+    throw new Error('readFromFile: filepath is required');
   }
 
   try {
@@ -382,7 +413,7 @@ export async function readFromFile(filepath: string, fileFormat: FileFormat = 'a
       const ext = path.extname(filepath).toLowerCase();
       if (ext === '.json') {
         format = 'json';
-      } else if (ext === '.png' || ext === '.jpg' || ext === '.jpeg') {
+      } else if (BINARY_EXTENSIONS.has(ext)) {
         format = 'binary';
       } else {
         format = 'txt';
@@ -404,7 +435,7 @@ export async function readFromFile(filepath: string, fileFormat: FileFormat = 'a
     logger.debug(`Successfully read data from ${filepath}`);
     return result;
   } catch (error) {
-    const err = error as Error;
+    const err = toError(error);
     logger.error(`Error reading from file ${filepath}: ${err.message}`);
     throw error;
   }
@@ -425,7 +456,7 @@ export async function fileToBase64(filepath: string): Promise<string> {
     logger.debug(`Converted ${filepath} to base64 (${base64.length} chars)`);
     return base64;
   } catch (error) {
-    const err = error as Error;
+    const err = toError(error);
     logger.error(`Error converting file to base64: ${err.message}`);
     throw new Error(`Failed to read image file '${filepath}': ${err.message}`);
   }
@@ -465,7 +496,7 @@ export async function urlToBase64(url: string): Promise<string> {
     logger.debug(`Downloaded and converted ${url} to base64 (${base64.length} chars, ${bytes.length} bytes)`);
     return base64;
   } catch (error) {
-    const err = error as Error;
+    const err = toError(error);
     logger.error(`Error downloading image from URL: ${err.message}`);
     throw new Error(`Failed to download image from '${url}': ${err.message}`);
   }
@@ -507,7 +538,7 @@ export async function downloadImage(url: string, filepath: string): Promise<void
     await fs.writeFile(filepath, bytes);
     logger.info(`Downloaded image to ${filepath} (${bytes.length} bytes)`);
   } catch (error) {
-    const err = error as Error;
+    const err = toError(error);
     logger.error(`Error downloading image: ${err.message}`);
     throw error;
   }
@@ -669,7 +700,7 @@ export async function fileToBuffer(filePath: string): Promise<Buffer> {
     logger.debug(`Read ${buffer.length} bytes from ${filePath}`);
     return buffer;
   } catch (error) {
-    const err = error as Error;
+    const err = toError(error);
     logger.error(`Failed to read file ${filePath}: ${err.message}`);
     throw error;
   }
@@ -688,7 +719,7 @@ export async function urlToBuffer(url: string): Promise<Buffer> {
     logger.debug(`Downloaded ${buffer.length} bytes from ${url}`);
     return buffer;
   } catch (error) {
-    const err = error as Error;
+    const err = toError(error);
     logger.error(`Failed to download image from ${url}: ${err.message}`);
     throw new Error(`Failed to download image from URL: ${err.message}`);
   }

@@ -54,7 +54,7 @@ describe('http: success paths', () => {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ id: 'abc', status: 'Ready' }));
     });
-    const body = await requestJson<{ id: string; status: string }>(`${base}/json`, {
+    const body = await requestJson(`${base}/json`, {
       timeoutMs: 5000,
     });
     expect(body).toEqual({ id: 'abc', status: 'Ready' });
@@ -193,8 +193,37 @@ describe('http: redirects', () => {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ arrived: true }));
     });
-    const body = await requestJson<{ arrived: boolean }>(`${base}/hop1`, { timeoutMs: 5000 });
-    expect(body.arrived).toBe(true);
+    const body = await requestJson(`${base}/hop1`, { timeoutMs: 5000 });
+    expect(body).toEqual({ arrived: true });
+  });
+
+  // A counted chain, not a loop: /chainN redirects to /chain(N-1), /chain0 answers.
+  // The loop test below cannot tell `hops >= max` from `hops > max`; this can
+  // (the ship pipeline's test-architect mutated exactly that and it survived).
+  function chain(length: number): string {
+    for (let i = length; i > 0; i--) {
+      routes.set(`/chain${i}`, (_q, res) => {
+        res.writeHead(302, { location: `${base}/chain${i - 1}` });
+        res.end();
+      });
+    }
+    routes.set('/chain0', (_q, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ arrived: true }));
+    });
+    return `${base}/chain${length}`;
+  }
+
+  it('follows exactly maxRedirects hops', async () => {
+    await expect(requestJson(chain(3), { timeoutMs: 5000, maxRedirects: 3 })).resolves.toEqual({ arrived: true });
+  });
+
+  it('refuses maxRedirects + 1 hops', async () => {
+    await expect(requestJson(chain(4), { timeoutMs: 5000, maxRedirects: 3 })).rejects.toThrow('Too many redirects');
+  });
+
+  it('with maxRedirects 0, refuses the first redirect', async () => {
+    await expect(requestJson(chain(1), { timeoutMs: 5000, maxRedirects: 0 })).rejects.toThrow('Too many redirects');
   });
 
   it('refuses to exceed maxRedirects', async () => {

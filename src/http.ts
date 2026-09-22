@@ -306,16 +306,19 @@ export async function request(
 }
 
 /**
- * Request a JSON endpoint.
+ * Request a JSON endpoint. Returns the parsed body as `unknown`: the caller
+ * checks its shape. (bfl-api's version is generic, `requestJson<T>`, and
+ * asserts the parse result to T; the ship pipeline flagged that as an
+ * unvalidated cast at a trust boundary, so this port returns unknown.)
  *
  * @throws StabilityHttpError / StabilityNetworkError / StabilityTimeoutError as `request`
  */
-export async function requestJson<T>(url: string, options: RequestOptions): Promise<T> {
+export async function requestJson(url: string, options: RequestOptions): Promise<unknown> {
   const { bytes } = await request(url, options);
   const text = bytes.toString('utf8');
-  if (text.length === 0) return undefined as T;
+  if (text.length === 0) return undefined;
   try {
-    return JSON.parse(text) as T;
+    return JSON.parse(text) as unknown;
   } catch {
     throw new StabilityNetworkError(`Expected JSON from ${url} but received ${text.slice(0, 120)}`);
   }

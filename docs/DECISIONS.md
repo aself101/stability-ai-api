@@ -246,3 +246,47 @@ rewrite of `api.ts` produced a whole-file diff. The fix is a `.gitattributes`
 `e0c80c7`. Note that `git add --renormalize` updates the index but **not the working
 tree**. The unchanged files stayed CRLF on disk, and `dist/` kept CRLF, until they
 were checked out again.
+
+## 16. Response shapes are checked, not cast
+
+`_makeFormDataRequest` can return an image, a task handle, or other JSON, and
+the 0.4.0 methods cast whichever arrived to the type they promised:
+`as ImageResult` on 15 synchronous methods, `as unknown as TaskResult` on a 202.
+Now `isImageResult` / `isTaskResult` are runtime guards, `_submitImage` and
+`_submitTask` narrow with them, and a 2xx of the wrong shape throws
+`StabilityResponseError` carrying the body. No public method in `api.ts` or
+`cli.ts` contains a type assertion on response data.
+
+**Why:** found by the ship pipeline's type-safety gate (run #1, 2026-09-22).
+For an SDK, return types are the contract, and a cast lets the contract lie:
+`result.image` was `undefined` behind a `Buffer` type if the server ever answered
+an image endpoint with JSON. `waitForResult` already narrowed correctly; the
+other paths now match it.
+
+**Breaks if:** Stability starts returning images as JSON (base64) under
+`accept: image/*`. That would now throw loudly instead of silently yielding an
+empty result — the intended failure.
+
+## 17. The constructor takes the key three ways
+
+Positional (`new StabilityAPI(key, baseUrl, logLevel)`, the 0.4.0 form), an
+options object (`StabilityApiOptions`), or nothing (falls back to
+`STABILITY_API_KEY`). A missing key is still reported on the first request, not
+at construction, so building a client in code that never calls it stays cheap.
+
+**Why:** the README has shown `new StabilityAPI()` and
+`new StabilityAPI({ apiKey })` since 0.2, and `StabilityApiOptions` was exported,
+but the constructor took only a positional string: the first form failed on the
+first request, the second stored `"[object Object]"` as the key. Making the code
+match nine README examples and an exported type was cheaper and friendlier than
+rewriting the examples to the positional form.
+
+## 18. CLI mapping lives in `cli-helpers.ts`
+
+`cli.ts` parses `process.argv` on import, so nothing in it could be tested. The
+option→parameter builders and `saveImageResult` moved to `src/cli-helpers.ts`,
+typed with the SDK's own parameter types (removing the
+`params as unknown as Parameters<...>` casts), and are unit-tested. That test is
+how the webp corruption in `writeToFile` (CHANGELOG, Fixed) was found. `cli.ts`
+itself (argument parsing, spinners, exit codes) stays excluded from coverage.
+

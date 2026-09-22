@@ -544,8 +544,8 @@ describe('File I/O Functions', () => {
     });
 
     it('should throw error when filepath is not provided', async () => {
-      await expect(writeToFile({ data: 'test' }, null)).rejects.toThrow('Filepath is required');
-      await expect(writeToFile({ data: 'test' }, '')).rejects.toThrow('Filepath is required');
+      await expect(writeToFile({ data: 'test' }, null)).rejects.toThrow('writeToFile: filepath is required');
+      await expect(writeToFile({ data: 'test' }, '')).rejects.toThrow('writeToFile: filepath is required');
     });
 
     it('should auto-detect JSON format from extension', async () => {
@@ -603,8 +603,8 @@ describe('File I/O Functions', () => {
     });
 
     it('should throw error when filepath is not provided', async () => {
-      await expect(readFromFile(null)).rejects.toThrow('Filepath is required');
-      await expect(readFromFile('')).rejects.toThrow('Filepath is required');
+      await expect(readFromFile(null)).rejects.toThrow('readFromFile: filepath is required');
+      await expect(readFromFile('')).rejects.toThrow('readFromFile: filepath is required');
     });
 
     it('should throw error for non-existent file', async () => {
@@ -818,5 +818,31 @@ describe('detectImageMime', () => {
     [Buffer.alloc(0), ''],
   ])('%#', (buffer, expected) => {
     expect(detectImageMime(buffer)).toBe(expected);
+  });
+});
+
+// ==================== Binary round-trips (1.0) ====================
+// 0.4.0 treated only .png/.jpg/.jpeg as binary; a .webp image was written as
+// String(buffer), i.e. UTF-8 decoded, so every `--output-format webp` save
+// from the CLI was corrupt. Found by the 1.0 cli-helpers saveImageResult test.
+describe('writeToFile / readFromFile keep image bytes intact', () => {
+  const bytes = Buffer.from([0x52, 0x49, 0x46, 0x46, 0xff, 0xfe, 0x80, 0x00, 0x57, 0x45, 0x42, 0x50]);
+  let dir;
+
+  beforeEach(() => { dir = join(process.cwd(), 'test-binary-roundtrip'); });
+  afterEach(async () => { await fs.rm(dir, { recursive: true, force: true }); });
+
+  it.each(['.webp', '.gif', '.png', '.jpeg', '.bin'])('a Buffer written to %s reads back byte-identical', async (ext) => {
+    const file = join(dir, `x${ext}`);
+    await writeToFile(bytes, file);
+    expect((await fs.readFile(file)).equals(bytes)).toBe(true);
+  });
+
+  it('readFromFile returns a .webp as a Buffer, not text', async () => {
+    const file = join(dir, 'x.webp');
+    await writeToFile(bytes, file);
+    const back = await readFromFile(file);
+    expect(Buffer.isBuffer(back)).toBe(true);
+    expect(back.equals(bytes)).toBe(true);
   });
 });

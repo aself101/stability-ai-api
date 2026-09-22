@@ -1,12 +1,11 @@
-# Stability AI Image Generation Service
+# Stability AI API — Image Generation, Upscaling, Editing & Control
 
 [![npm version](https://img.shields.io/npm/v/stability-ai-api.svg)](https://www.npmjs.com/package/stability-ai-api)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node.js Version](https://img.shields.io/node/v/stability-ai-api)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue.svg)](https://www.typescriptlang.org/)
-[![Tests](https://img.shields.io/badge/tests-401%20passing-brightgreen)](test/)
-[![Coverage](https://img.shields.io/badge/coverage-90.6%25-brightgreen)](test/)
-[![Coverage](https://img.shields.io/badge/coverage-76%25-green)](test/)
+[![Tests](https://img.shields.io/badge/tests-415%20passing-brightgreen)](test/)
+[![Coverage](https://img.shields.io/badge/coverage-93.1%25-brightgreen)](test/)
 
 A TypeScript/Node.js wrapper for the [Stability AI API](https://platform.stability.ai/docs/api-reference) that provides easy access to Stable Diffusion 3.5, image upscaling, editing, and control models. Generate stunning AI images, upscale, edit, and control them with professional quality through a simple command-line interface.
 
@@ -83,7 +82,7 @@ The Stability AI API provides access to state-of-the-art image generation and up
 - **Organized Storage** - Structured directories with timestamped files and metadata
 - **CLI Orchestration** - Command-line tool with subcommands for generation and upscaling
 - **Full TypeScript Support** - Complete type definitions for all API methods, parameters, and responses
-- **Comprehensive Testing** - 401 tests, 90.6% line coverage (api.ts 95.0%, config.ts 92.9%, http.ts 91.2%, utils.ts 85.3%; measured 2026-09-22), no network access; a spec-drift check against the live API runs in CI
+- **Comprehensive Testing** - 415 tests, 93.1% line coverage (api.ts 96.4%, cli-helpers.ts 95.4%, config.ts 94.3%, http.ts 91.2%, utils.ts 89.6%; measured 2026-09-22), no network access; a spec-drift check against the live API runs in CI
 
 ### Endpoint Summary
 
@@ -468,64 +467,82 @@ This package is written in TypeScript and includes full type definitions. All AP
 ```typescript
 import {
   StabilityAPI,
-  // Parameter types
-  UltraParams,
-  CoreParams,
-  SD3Params,
-  UpscaleFastParams,
-  UpscaleConservativeParams,
-  UpscaleCreativeParams,
-  // Edit parameter types
-  EditEraseParams,
-  EditInpaintParams,
-  EditOutpaintParams,
-  EditSearchReplaceParams,
-  EditSearchRecolorParams,
-  EditRemoveBackgroundParams,
-  EditReplaceBackgroundParams,
-  // Control parameter types
-  ControlSketchParams,
-  ControlStructureParams,
-  ControlStyleParams,
-  ControlStyleTransferParams,
-  // Response types
-  ImageResult,
-  TaskResult
+  // Errors and runtime checks
+  StabilityHttpError,       // non-2xx response: status, retryAfter, body
+  StabilityNetworkError,    // no response: code, retryable
+  StabilityTimeoutError,    // no data within the timeout
+  StabilityResponseError,   // 2xx with the wrong shape: body
+  isTransientError,         // the retry classifier waitForResult uses
+  isImageResult,            // type guard: { image: Buffer, ... }
+  isTaskResult,             // type guard: { id: string }
 } from 'stability-ai-api';
 
-// Types are automatically inferred
-const api = new StabilityAPI();
-const result = await api.generateUltra({
-  prompt: 'a cat',  // TypeScript will validate all parameters
-  aspect_ratio: '16:9'
-});
+import type {
+  StabilityApiOptions,
+  // Generate and upscale parameters
+  UltraParams, CoreParams, SD3Params, UpscaleParams,
+  // Edit parameters
+  EraseParams, InpaintParams, OutpaintParams, SearchAndReplaceParams,
+  SearchAndRecolorParams, RemoveBackgroundParams, ReplaceBackgroundParams,
+  // Control parameters
+  ControlSketchParams, ControlStructureParams, ControlStyleParams, ControlStyleTransferParams,
+  // Results and options
+  ImageResult, TaskResult, CreditsResult, WaitResultOptions, ValidationResult,
+} from 'stability-ai-api';
 ```
 
-### Type-Safe Parameters
-
-All generation methods have strict parameter typing:
+Parameter types check field names and value types at compile time. Enumerated
+values (`aspect_ratio`, `output_format`, `style_preset`, `model`) are typed as
+`string` and checked at runtime by `validateModelParams` / `validateEditParams` /
+`validateControlParams` (below), which the CLI runs before every request.
 
 ```typescript
-// TypeScript will catch invalid parameters at compile time
 const result = await api.generateUltra({
   prompt: 'a landscape',
-  aspect_ratio: '16:9',    // '1:1' | '16:9' | '21:9' | '2:3' | '3:2' | '4:5' | '5:4' | '9:16' | '9:21'
-  seed: 42,                // optional number (0-4294967294)
+  aspect_ratio: '16:9',    // one of ASPECT_RATIOS
+  seed: 42,                // 0-4294967294
   output_format: 'png'     // 'jpeg' | 'png' | 'webp'
 });
-
-// Edit operations are also fully typed
-const edited = await api.searchAndReplace(
-  './image.jpg',
-  'golden retriever',      // prompt
-  'cat',                   // search_prompt
-  {
-    negative_prompt: 'blurry',
-    grow_mask: 5,
-    output_format: 'png'
-  }
-);
 ```
+
+### Subpath Exports: `stability-ai-api/config` and `stability-ai-api/utils`
+
+Two more entry points expose the tables and helpers the client and CLI are built on.
+
+**`stability-ai-api/config`** — endpoint registry, constraints and validators:
+
+| Export | What it is |
+|---|---|
+| `ENDPOINT_FIELDS` | Every text and file field each of the 17 endpoints accepts, keyed by path. The single source of what the client sends; checked against the live spec by `npm run check:spec` |
+| `MODEL_ENDPOINTS`, `EDIT_ENDPOINTS`, `CONTROL_ENDPOINTS` | Endpoint paths by name |
+| `MODEL_CONSTRAINTS`, `EDIT_CONSTRAINTS`, `CONTROL_CONSTRAINTS` | Ranges and enums per operation (`getModelConstraints` / `getEditConstraints` / `getControlConstraints` look one up) |
+| `ASPECT_RATIOS`, `OUTPUT_FORMATS`, `STYLE_PRESETS` | Accepted enum values |
+| `validateModelParams`, `validateEditParams`, `validateControlParams` | Validate a parameter object before sending; return `{ valid, errors }` |
+| `imageToImageErrors` | The Ultra/SD 3.5 image + strength + aspect-ratio rules |
+| `getStabilityApiKey`, `validateApiKeyFormat` | Key lookup (flag → env → `.env` → `~/.stability/.env`) and a format check |
+| `BASE_URL`, `DEFAULT_POLL_INTERVAL`, `DEFAULT_TIMEOUT`, `MAX_RETRIES`, `getOutputDir`, `getPollInterval`, `getTimeout` | Defaults |
+
+```typescript
+import { validateModelParams, STYLE_PRESETS } from 'stability-ai-api/config';
+
+const { valid, errors } = validateModelParams('sd3', { model: 'sd3.5-flash', cfg_scale: 12 });
+// valid === false; errors: ['cfg_scale must be between 1 and 10 for sd3']
+```
+
+**`stability-ai-api/utils`** — I/O and security helpers:
+
+| Export | What it is |
+|---|---|
+| `validateImageUrl` | SSRF check: HTTPS only, every DNS answer checked against private/loopback/metadata ranges |
+| `imageToBuffer`, `fileToBuffer`, `urlToBuffer` | Load an input image from a path or a validated URL (redirect hops re-validated, 50 MB cap) |
+| `imageToBase64`, `fileToBase64`, `urlToBase64`, `downloadImage` | The same, as base64 or to disk |
+| `buildFormData`, `detectImageMime` | Build a multipart body with typed image parts |
+| `writeToFile`, `readFromFile`, `ensureDirectory` | File I/O; Buffers are always written as binary |
+| `validateImagePath`, `validateImageFile` | Local input checks (existence, magic bytes, size/dimensions) |
+| `promptToFilename`, `generateTimestampedFilename`, `createSpinner`, `pause`, `randomNumber` | Small helpers the CLI uses |
+| `toError`, `errorCode` | Narrow a caught `unknown` to an `Error` / its Node error code |
+| `logger`, `setLogLevel` | The shared winston logger |
+| `MAX_DOWNLOAD_SIZE`, `DOWNLOAD_TIMEOUT_MS`, `MAX_REDIRECTS` | Download limits |
 
 ### Building from Source
 
@@ -554,12 +571,16 @@ import { StabilityAPI } from 'stability-ai-api';
 // If running from source
 import { StabilityAPI } from './src/api.js';
 
-// Initialize with API key (reads from env vars by default)
+// No arguments: uses STABILITY_API_KEY (environment, or a .env file)
 const api = new StabilityAPI();
 
-// Or explicitly provide API key
-const api = new StabilityAPI({ apiKey: 'your-api-key-here' });
+// Or pass the key, positionally or as an options object
+const api = new StabilityAPI('your-api-key-here');
+const api = new StabilityAPI({ apiKey: 'your-api-key-here', logLevel: 'warn' });
 ```
+
+The examples below each create their own `api` where they are complete programs;
+the shorter snippets assume the `api` from this section.
 
 ### Generation Methods
 
@@ -873,7 +894,7 @@ any `Retry-After` value (seconds) and the parsed response `body`. Branch on
 `status`, not on message text:
 
 ```javascript
-import { StabilityAPI, StabilityHttpError, StabilityNetworkError, StabilityTimeoutError } from 'stability-ai-api';
+import { StabilityAPI, StabilityHttpError, StabilityNetworkError, StabilityTimeoutError, StabilityResponseError } from 'stability-ai-api';
 
 const api = new StabilityAPI();
 
@@ -894,6 +915,8 @@ try {
     console.error('No response from the API:', error.code, error.retryable ? '(retryable)' : '');
   } else if (error instanceof StabilityTimeoutError) {
     console.error(`No data for ${error.timeoutMs}ms`);
+  } else if (error instanceof StabilityResponseError) {
+    console.error('Unexpected response shape', error.body);  // e.g. JSON where an image was expected
   } else {
     throw error;
   }

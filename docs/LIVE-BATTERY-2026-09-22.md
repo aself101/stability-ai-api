@@ -63,10 +63,18 @@ server abandoned it too; see finding 3.
    the spec's suggestion: the high range suits restyling with a descriptive prompt, not
    edits.
 
-3. **The balance endpoint did not move.** `GET /v1/user/balance` read 1072.5 before the
-   battery was approved and 2026.0 when it started — `[VERIFY]` presumably a top-up in
-   between; not confirmed — and still 2026.0 after 206 credits of list-price work. Every per-run before/after delta
-   was 0. The balance is evidently cached or settled later, so it cannot measure
-   per-run cost. The costs above are list prices from the spec. `[VERIFY]` actual
-   billing against the account's usage page, and whether the timed-out Ultra run was
-   charged.
+3. **The balance endpoint was wrong during the battery; billing was exactly list price.**
+   `GET /v1/user/balance` read 1072.5 when the battery was approved, then 2026.0 for the
+   whole run (every per-run before/after delta was 0), and 866.5 afterwards. The account
+   dashboard settles it: the only payment is 2,000 credits on 2025-11-16 (no top-up),
+   and the balance is **866.5 = 1072.5 − 206.0**, exactly the list price of the 23
+   successful runs. So billing matched the price list, and the timed-out Ultra run was
+   **not** charged (it would have been 214). The same key produced every reading (only
+   one key is configured); the 2026.0 figure is unexplained. The balance endpoint cannot
+   be used for per-run cost accounting.
+
+## Addendum — after the ship-pipeline fixes
+
+| run | endpoint / model | result | list price | output | notes |
+|---|---|---|---|---|---|
+| sd3-flash-webp | generate/sd3 `sd3.5-flash`, `-f webp` | OK | 2.5 | 1024×1024 | through the refactored CLI (`cli-helpers.ts`); the saved `.webp` decodes. Before the `writeToFile` fix every webp save was UTF-8-mangled |

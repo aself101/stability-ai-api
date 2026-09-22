@@ -14,10 +14,11 @@
  * console.log('Image URL:', result.image_url);
  */
 
-import { logger, buildFormData, createSpinner } from './utils.js';
+import { logger, buildFormData, createSpinner, toError } from './utils.js';
 import { request, requestJson, StabilityHttpError, StabilityNetworkError, StabilityTimeoutError } from './http.js';
 import { BASE_URL, MODEL_ENDPOINTS, EDIT_ENDPOINTS, CONTROL_ENDPOINTS, ENDPOINT_FIELDS, DEFAULT_POLL_INTERVAL, DEFAULT_TIMEOUT, MAX_RETRIES, imageToImageErrors } from './config.js';
 import type {
+  StabilityApiOptions,
   ImageResult,
   TaskResult,
   CreditsResult,
@@ -79,6 +80,38 @@ function throwIfInvalid(errors: string[]): void {
 }
 
 /**
+ * A 2xx response whose body is not the shape the operation promises — an
+ * "image" endpoint answering with JSON, or a task response without a string
+ * `id`. Carries the parsed `body` for diagnosis. Until 1.0 such bodies were
+ * cast to the promised type and returned, so `result.image` was `undefined`
+ * behind a `Buffer` type.
+ */
+export class StabilityResponseError extends Error {
+  readonly body: unknown;
+
+  constructor(message: string, body: unknown) {
+    super(message);
+    this.name = 'StabilityResponseError';
+    this.body = body;
+  }
+}
+
+/** Runtime check for a synchronous image result (bytes plus header metadata). */
+export function isImageResult(value: unknown): value is ImageResult {
+  return typeof value === 'object' && value !== null && 'image' in value && Buffer.isBuffer(value.image);
+}
+
+/** Runtime check for a balance response. */
+function isCreditsResult(value: unknown): value is CreditsResult {
+  return typeof value === 'object' && value !== null && 'credits' in value && typeof value.credits === 'number';
+}
+
+/** Runtime check for an async task handle. */
+export function isTaskResult(value: unknown): value is TaskResult {
+  return typeof value === 'object' && value !== null && 'id' in value && typeof value.id === 'string';
+}
+
+/**
  * Fail before any network call when an endpoint's required prompt is missing.
  * The server answers `400 prompt: required` anyway (confirmed 2026-09-22 for
  * both upscalers); this makes the message say which method needed it.
@@ -100,14 +133,32 @@ export class StabilityAPI {
   /**
    * Create a new Stability AI API client.
    *
-   * @param apiKey - Stability AI API key
-   * @param baseUrl - API base URL
-   * @param logLevel - Logging level (debug, info, warn, error)
+   * Takes the key positionally or an options object. With no key, falls back
+   * to `STABILITY_API_KEY` (the environment, or a `.env` loaded by the config
+   * module). A missing key is reported on the first request, not here.
+   *
+   * Until 1.0 the key was a required positional string, while the README showed
+   * `new StabilityAPI()` and `new StabilityAPI({ apiKey })` — the first failed
+   * on the first request, the second stored "[object Object]" as the key.
+   *
+   * @param apiKeyOrOptions - API key, or `{ apiKey, baseUrl, logLevel }`
+   * @param baseUrl - API base URL (positional form only)
+   * @param logLevel - Logging level: debug, info, warn, error (positional form only)
    *
    * @example
+   * const api = new StabilityAPI();                    // STABILITY_API_KEY
    * const api = new StabilityAPI('sk-xxxxx');
+   * const api = new StabilityAPI({ apiKey: 'sk-xxxxx', logLevel: 'warn' });
    */
-  constructor(apiKey: string, baseUrl = BASE_URL, logLevel = 'info') {
+  constructor(apiKeyOrOptions?: string | StabilityApiOptions | null, baseUrl?: string, logLevel?: string) {
+    const options: StabilityApiOptions =
+      typeof apiKeyOrOptions === 'object' && apiKeyOrOptions !== null
+        ? apiKeyOrOptions
+        : { apiKey: apiKeyOrOptions ?? undefined, baseUrl, logLevel };
+    const apiKey = options.apiKey ?? process.env.STABILITY_API_KEY ?? '';
+    baseUrl = options.baseUrl ?? BASE_URL;
+    logLevel = options.logLevel ?? 'info';
+
     // Validate base URL uses HTTPS
     if (!baseUrl.startsWith('https://')) {
       throw new Error('Base URL must use HTTPS protocol for security');
@@ -160,7 +211,7 @@ export class StabilityAPI {
    * Network and timeout errors pass through unchanged.
    */
   private _toApiError(error: unknown): Error {
-    if (!(error instanceof StabilityHttpError)) return error as Error;
+    if (!(error instanceof StabilityHttpError)) return toError(error);
 
     const { status, retryAfter, body } = error;
     const errors = (body as ErrorResponseData | undefined)?.errors;
@@ -233,7 +284,7 @@ export class StabilityAPI {
         maxRedirects: 0,
       });
     } catch (error) {
-      logger.error(`Request failed: ${(error as Error).message}`);
+      logger.error(`Request failed: ${toError(error).message}`);
       throw this._toApiError(error);
     }
 
@@ -260,8 +311,11 @@ export class StabilityAPI {
       }
     }
     if (status === 202) {
+      if (!isTaskResult(data)) {
+        throw new StabilityResponseError(`202 from ${endpoint} without a task id`, data);
+      }
       logger.info('Received async task ID');
-      return data as unknown as TaskResult;
+      return data;
     }
     if (typeof data.id === 'string') {
       logger.info(`Received async task ID: ${data.id}`);
@@ -295,6 +349,44 @@ export class StabilityAPI {
     const fileParts = Object.fromEntries(fields.files.map(f => [f, files[f]]));
     const formData = await buildFormData(text, fileParts);
     return await this._makeFormDataRequest('POST', path, formData);
+  }
+
+  /**
+   * `_submit` for a synchronous endpoint: the response must be an image.
+   *
+   * @throws StabilityResponseError if the server answered 2xx with anything else
+   */
+  private async _submitImage(
+    path: string,
+    values: object,
+    files: Record<string, string | Buffer | undefined> = {}
+  ): Promise<ImageResult> {
+    const result = await this._submit(path, values, files);
+    if (isImageResult(result)) return result;
+    throw new StabilityResponseError(`Expected an image from ${path}`, result);
+  }
+
+  /**
+   * `_submit` for an async endpoint: the response is a task id, polled to an
+   * image when `wait` is not false. An image returned directly is passed
+   * through.
+   *
+   * @throws StabilityResponseError if the response is neither a task nor an image
+   */
+  private async _submitTask(
+    path: string,
+    values: object,
+    files: Record<string, string | Buffer | undefined>,
+    wait: boolean | undefined
+  ): Promise<ImageResult | TaskResult> {
+    const result = await this._submit(path, values, files);
+    if (isImageResult(result)) return result;
+    if (!isTaskResult(result)) {
+      throw new StabilityResponseError(`Expected a task id or an image from ${path}`, result);
+    }
+    if (wait === false) return result;
+    logger.info(`Got task ID: ${result.id}, waiting for result...`);
+    return await this.waitForResult(result.id);
   }
 
   /**
@@ -336,12 +428,12 @@ export class StabilityAPI {
           const result = await this.getResult(taskId);
 
           // Check if task is complete (HTTP 200 with image)
-          if ('image' in result && result.image) {
+          if (isImageResult(result)) {
             if (spinner) {
               spinner.stop(`✓ Upscale complete! (${elapsed.toFixed(1)}s)`);
             }
             logger.info(`Task ${taskId} completed after ${elapsed.toFixed(1)}s`);
-            return result as ImageResult;
+            return result;
           }
 
           // If still in progress (HTTP 202), continue polling
@@ -359,7 +451,7 @@ export class StabilityAPI {
           }
           const retryAfter = error instanceof StabilityHttpError ? error.retryAfter : undefined;
           waitSeconds = Math.max(pollInterval, retryAfter ?? 0);
-          logger.warn(`Transient error (${consecutiveFailures}/${maxRetries}), retrying in ${waitSeconds}s: ${(error as Error).message}`);
+          logger.warn(`Transient error (${consecutiveFailures}/${maxRetries}), retrying in ${waitSeconds}s: ${toError(error).message}`);
           if (spinner) {
             spinner.update(`Retrying after error...`);
           }
@@ -408,7 +500,7 @@ export class StabilityAPI {
     logger.info('Generating image with Stable Image Ultra');
 
     throwIfInvalid(imageToImageErrors('stable-image-ultra', params));
-    return await this._submit(MODEL_ENDPOINTS['stable-image-ultra'], params, { image: params.image }) as ImageResult;
+    return await this._submitImage(MODEL_ENDPOINTS['stable-image-ultra'], params, { image: params.image });
   }
 
   /**
@@ -424,7 +516,7 @@ export class StabilityAPI {
   async generateCore(params: CoreParams): Promise<ImageResult> {
     logger.info('Generating image with Stable Image Core');
 
-    return await this._submit(MODEL_ENDPOINTS['stable-image-core'], params) as ImageResult;
+    return await this._submitImage(MODEL_ENDPOINTS['stable-image-core'], params);
   }
 
   /**
@@ -443,7 +535,7 @@ export class StabilityAPI {
     // mode is derived, never taken from the caller: with an image it must be
     // image-to-image; without one the server default (text-to-image) applies.
     const values = { ...params, mode: params.image ? 'image-to-image' : undefined };
-    return await this._submit(MODEL_ENDPOINTS['sd3'], values, { image: params.image }) as ImageResult;
+    return await this._submitImage(MODEL_ENDPOINTS['sd3'], values, { image: params.image });
   }
 
   /**
@@ -459,7 +551,7 @@ export class StabilityAPI {
   async upscaleFast(imagePath: string, outputFormat = 'png'): Promise<ImageResult> {
     logger.info('Upscaling image with Fast Upscaler');
 
-    return await this._submit(MODEL_ENDPOINTS['upscale-fast'], { output_format: outputFormat }, { image: imagePath }) as ImageResult;
+    return await this._submitImage(MODEL_ENDPOINTS['upscale-fast'], { output_format: outputFormat }, { image: imagePath });
   }
 
   /**
@@ -476,7 +568,7 @@ export class StabilityAPI {
     logger.info('Upscaling image with Conservative Upscaler');
 
     requirePrompt(params?.prompt, 'Conservative upscale');
-    return await this._submit(MODEL_ENDPOINTS['upscale-conservative'], params, { image: imagePath }) as ImageResult;
+    return await this._submitImage(MODEL_ENDPOINTS['upscale-conservative'], params, { image: imagePath });
   }
 
   /**
@@ -493,16 +585,7 @@ export class StabilityAPI {
     logger.info('Upscaling image with Creative Upscaler (async)');
 
     requirePrompt(params?.prompt, 'Creative upscale');
-    const task = await this._submit(MODEL_ENDPOINTS['upscale-creative'], params, { image: imagePath });
-
-    // If wait is enabled (default), poll for result
-    const taskWithId = task as { id?: string };
-    if (params.wait !== false && taskWithId.id) {
-      logger.info(`Got task ID: ${taskWithId.id}, waiting for result...`);
-      return await this.waitForResult(taskWithId.id);
-    }
-
-    return task as TaskResult;
+    return await this._submitTask(MODEL_ENDPOINTS['upscale-creative'], params, { image: imagePath }, params.wait);
   }
 
   /**
@@ -518,7 +601,7 @@ export class StabilityAPI {
     this._verifyApiKey();
 
     try {
-      const data = await requestJson<CreditsResult>(`${this.baseUrl}/v1/user/balance`, {
+      const data = await requestJson(`${this.baseUrl}/v1/user/balance`, {
         headers: {
           'authorization': `Bearer ${this.apiKey}`,
           'accept': 'application/json'
@@ -527,6 +610,9 @@ export class StabilityAPI {
         maxRedirects: 0,
       });
 
+      if (!isCreditsResult(data)) {
+        throw new StabilityResponseError('Balance response has no numeric credits', data);
+      }
       logger.info(`Account balance: ${data.credits} credits`);
       return data;
     } catch (error) {
@@ -553,7 +639,7 @@ export class StabilityAPI {
   async erase(image: string, options: EraseParams = {}): Promise<ImageResult> {
     logger.info('Erasing objects from image');
 
-    return await this._submit(EDIT_ENDPOINTS['erase'], options, { image, mask: options.mask }) as ImageResult;
+    return await this._submitImage(EDIT_ENDPOINTS['erase'], options, { image, mask: options.mask });
   }
 
   /**
@@ -570,7 +656,7 @@ export class StabilityAPI {
   async inpaint(image: string, prompt: string, options: InpaintParams = {}): Promise<ImageResult> {
     logger.info('Inpainting image with prompt');
 
-    return await this._submit(EDIT_ENDPOINTS['inpaint'], { ...options, prompt }, { image, mask: options.mask }) as ImageResult;
+    return await this._submitImage(EDIT_ENDPOINTS['inpaint'], { ...options, prompt }, { image, mask: options.mask });
   }
 
   /**
@@ -587,7 +673,7 @@ export class StabilityAPI {
   async outpaint(image: string, options: OutpaintParams = {}): Promise<ImageResult> {
     logger.info('Outpainting image');
 
-    return await this._submit(EDIT_ENDPOINTS['outpaint'], options, { image }) as ImageResult;
+    return await this._submitImage(EDIT_ENDPOINTS['outpaint'], options, { image });
   }
 
   /**
@@ -605,7 +691,7 @@ export class StabilityAPI {
   async searchAndReplace(image: string, prompt: string, searchPrompt: string, options: SearchAndReplaceParams = {}): Promise<ImageResult> {
     logger.info(`Searching for "${searchPrompt}" and replacing with "${prompt}"`);
 
-    return await this._submit(EDIT_ENDPOINTS['search-and-replace'], { ...options, prompt, search_prompt: searchPrompt }, { image }) as ImageResult;
+    return await this._submitImage(EDIT_ENDPOINTS['search-and-replace'], { ...options, prompt, search_prompt: searchPrompt }, { image });
   }
 
   /**
@@ -623,7 +709,7 @@ export class StabilityAPI {
   async searchAndRecolor(image: string, prompt: string, selectPrompt: string, options: SearchAndRecolorParams = {}): Promise<ImageResult> {
     logger.info(`Searching for "${selectPrompt}" and recoloring to "${prompt}"`);
 
-    return await this._submit(EDIT_ENDPOINTS['search-and-recolor'], { ...options, prompt, select_prompt: selectPrompt }, { image }) as ImageResult;
+    return await this._submitImage(EDIT_ENDPOINTS['search-and-recolor'], { ...options, prompt, select_prompt: selectPrompt }, { image });
   }
 
   /**
@@ -646,7 +732,7 @@ export class StabilityAPI {
       throw new Error('Remove background does not support jpeg output format (requires transparency). Use png or webp.');
     }
 
-    return await this._submit(EDIT_ENDPOINTS['remove-background'], options, { image }) as ImageResult;
+    return await this._submitImage(EDIT_ENDPOINTS['remove-background'], options, { image });
   }
 
   /**
@@ -677,20 +763,11 @@ export class StabilityAPI {
       throw new Error('light_source_strength requires either light_reference or light_source_direction');
     }
 
-    const task = await this._submit(EDIT_ENDPOINTS['replace-background-and-relight'], options, {
+    return await this._submitTask(EDIT_ENDPOINTS['replace-background-and-relight'], options, {
       subject_image: subjectImage,
       background_reference: options.background_reference,
       light_reference: options.light_reference,
-    });
-
-    // If wait is enabled (default), poll for result
-    const taskWithId = task as { id?: string };
-    if (options.wait !== false && taskWithId.id) {
-      logger.info(`Got task ID: ${taskWithId.id}, waiting for result...`);
-      return await this.waitForResult(taskWithId.id);
-    }
-
-    return task as TaskResult;
+    }, options.wait);
   }
 
   // ==================== Control Methods ====================
@@ -712,7 +789,7 @@ export class StabilityAPI {
   async controlSketch(image: string, prompt: string, options: ControlSketchParams = {}): Promise<ImageResult> {
     logger.info('Generating from sketch with Control: Sketch');
 
-    return await this._submit(CONTROL_ENDPOINTS['sketch'], { ...options, prompt }, { image }) as ImageResult;
+    return await this._submitImage(CONTROL_ENDPOINTS['sketch'], { ...options, prompt }, { image });
   }
 
   /**
@@ -732,7 +809,7 @@ export class StabilityAPI {
   async controlStructure(image: string, prompt: string, options: ControlStructureParams = {}): Promise<ImageResult> {
     logger.info('Generating with structure preservation with Control: Structure');
 
-    return await this._submit(CONTROL_ENDPOINTS['structure'], { ...options, prompt }, { image }) as ImageResult;
+    return await this._submitImage(CONTROL_ENDPOINTS['structure'], { ...options, prompt }, { image });
   }
 
   /**
@@ -752,7 +829,7 @@ export class StabilityAPI {
   async controlStyle(image: string, prompt: string, options: ControlStyleParams = {}): Promise<ImageResult> {
     logger.info('Generating with style guidance with Control: Style');
 
-    return await this._submit(CONTROL_ENDPOINTS['style'], { ...options, prompt }, { image }) as ImageResult;
+    return await this._submitImage(CONTROL_ENDPOINTS['style'], { ...options, prompt }, { image });
   }
 
   /**
@@ -775,7 +852,7 @@ export class StabilityAPI {
   async controlStyleTransfer(initImage: string, styleImage: string, options: ControlStyleTransferParams = {}): Promise<ImageResult> {
     logger.info('Transferring style between images with Control: Style Transfer');
 
-    return await this._submit(CONTROL_ENDPOINTS['style-transfer'], options, { init_image: initImage, style_image: styleImage }) as ImageResult;
+    return await this._submitImage(CONTROL_ENDPOINTS['style-transfer'], options, { init_image: initImage, style_image: styleImage });
   }
 }
 

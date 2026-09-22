@@ -25,20 +25,30 @@
 
 import { Command } from 'commander';
 import { StabilityAPI } from './api.js';
-import { getStabilityApiKey, validateModelParams, validateEditParams, validateControlParams, getOutputDir, STYLE_PRESETS, ASPECT_RATIOS } from './config.js';
+import { getStabilityApiKey, validateModelParams, validateEditParams, validateControlParams, STYLE_PRESETS, ASPECT_RATIOS } from './config.js';
 import {
-  writeToFile,
-  ensureDirectory,
-  promptToFilename,
-  generateTimestampedFilename,
   createSpinner,
   setLogLevel,
+  toError,
   logger
 } from './utils.js';
 import path from 'path';
 import { existsSync, readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { isImageResult } from './api.js';
+import {
+  buildGenerateParams,
+  buildUpscaleParams,
+  buildEditParams,
+  buildControlParams,
+  requiredString,
+  saveImageResult,
+  type GenerateOptions,
+  type UpscaleOptions,
+  type EditOptions,
+  type ControlOptions,
+} from './cli-helpers.js';
 import type { ImageResult } from './types/index.js';
 
 // Dynamically read version from package.json to prevent drift
@@ -52,73 +62,6 @@ interface GlobalOptions {
   apiKey?: string;
   outputDir?: string;
   logLevel: string;
-}
-
-interface GenerateOptions {
-  prompt: string[];
-  negativePrompt?: string;
-  aspectRatio?: string;
-  cfgScale?: number;
-  seed?: number;
-  outputFormat: string;
-  image?: string;
-  strength?: number;
-  stylePreset?: string;
-  model?: string;
-}
-
-interface UpscaleOptions {
-  image: string;
-  prompt?: string;
-  negativePrompt?: string;
-  seed?: number;
-  outputFormat: string;
-  creativity?: number;
-  stylePreset?: string;
-}
-
-interface EditOptions {
-  image: string;
-  mask?: string;
-  prompt?: string;
-  negativePrompt?: string;
-  growMask?: number;
-  seed?: number;
-  outputFormat: string;
-  stylePreset?: string;
-  search?: string;
-  select?: string;
-  left?: number;
-  right?: number;
-  up?: number;
-  down?: number;
-  creativity?: number;
-  backgroundPrompt?: string;
-  backgroundReference?: string;
-  foregroundPrompt?: string;
-  preserveSubject?: number;
-  backgroundDepth?: number;
-  keepOriginalBg?: boolean;
-  lightDirection?: string;
-  lightReference?: string;
-  lightStrength?: number;
-}
-
-interface ControlOptions {
-  image?: string;
-  initImage?: string;
-  styleImage?: string;
-  prompt?: string;
-  negativePrompt?: string;
-  controlStrength?: number;
-  fidelity?: number;
-  aspectRatio?: string;
-  styleStrength?: number;
-  compositionFidelity?: number;
-  changeStrength?: number;
-  seed?: number;
-  outputFormat: string;
-  stylePreset?: string;
 }
 
 /**
@@ -679,34 +622,15 @@ async function handleGenerateCommand(model: string, options: GenerateOptions, gl
       logger.info(`Prompt: "${prompt}"`);
       logger.info('='.repeat(60));
 
-      // Build parameters
-      const params: Record<string, unknown> = {
-        prompt,
-        negative_prompt: options.negativePrompt,
-        aspect_ratio: options.aspectRatio,
-        seed: options.seed,
-        output_format: options.outputFormat
-      };
-
-      // Add model-specific parameters
-      // image and strength are set together or not at all; validation below
-      // rejects either one alone. (0.4.0 dropped --strength silently when
-      // --image was missing.)
-      if (model === 'stable-image-ultra' || model === 'sd3') {
-        params.image = options.image;
-        params.strength = options.strength;
-        if (options.image) {
-          logger.info('Image-to-image: using input image ' + options.image);
-        }
-      }
-      params.style_preset = options.stylePreset;
-      if (model === 'sd3') {
-        params.model = options.model;
-        params.cfg_scale = options.cfgScale;
+      const params = buildGenerateParams(model, prompt, options);
+      if (params.image) {
+        logger.info('Image-to-image: using input image ' + params.image);
       }
 
-      // Validate parameters
-      const validation = validateModelParams(model, params);
+      // Validate parameters. The spread gives the typed params an anonymous
+      // object type, which (unlike the SD3Params interface) is assignable to
+      // the validator's index-signature parameter — no cast needed.
+      const validation = validateModelParams(model, { ...params });
       if (!validation.valid) {
         logger.error('Parameter validation failed:');
         validation.errors.forEach(err => logger.error(`  - ${err}`));
@@ -723,11 +647,11 @@ async function handleGenerateCommand(model: string, options: GenerateOptions, gl
         try {
           // Call appropriate API method
           if (model === 'stable-image-ultra') {
-            result = await api.generateUltra(params as unknown as Parameters<typeof api.generateUltra>[0]);
+            result = await api.generateUltra(params);
           } else if (model === 'stable-image-core') {
-            result = await api.generateCore(params as unknown as Parameters<typeof api.generateCore>[0]);
+            result = await api.generateCore(params);
           } else if (model === 'sd3') {
-            result = await api.generateSD3(params as unknown as Parameters<typeof api.generateSD3>[0]);
+            result = await api.generateSD3(params);
           } else {
             throw new Error(`Unknown model: ${model}`);
           }
@@ -746,7 +670,7 @@ async function handleGenerateCommand(model: string, options: GenerateOptions, gl
         logger.info('='.repeat(60));
 
       } catch (error) {
-        const err = error as Error;
+        const err = toError(error);
         logger.error('='.repeat(60));
         logger.error(`${batchPrefix}✗ Generation failed: ${err.message}`);
         logger.error('='.repeat(60));
@@ -755,7 +679,7 @@ async function handleGenerateCommand(model: string, options: GenerateOptions, gl
     }
 
   } catch (error) {
-    const err = error as Error;
+    const err = toError(error);
     logger.error(`\n✗ Error: ${err.message}`);
     process.exit(1);
   }
@@ -787,23 +711,10 @@ async function handleUpscaleCommand(model: string, options: UpscaleOptions, glob
     logger.info(`Input: ${options.image}`);
     logger.info('='.repeat(60));
 
-    // Build parameters
-    const params: Record<string, unknown> = {
-      prompt: options.prompt,
-      negative_prompt: options.negativePrompt,
-      seed: options.seed,
-      output_format: options.outputFormat || 'png'
-    };
+    const params = buildUpscaleParams(model, options);
 
-    if (model === 'upscale-conservative' || model === 'upscale-creative') {
-      params.creativity = options.creativity;
-    }
-    if (model === 'upscale-creative') {
-      params.style_preset = options.stylePreset;
-    }
-
-    // Validate parameters
-    const validation = validateModelParams(model, params);
+    // Validate parameters (spread: see handleGenerateCommand)
+    const validation = validateModelParams(model, { ...params });
     if (!validation.valid) {
       logger.error('Parameter validation failed:');
       validation.errors.forEach(err => logger.error(`  - ${err}`));
@@ -826,11 +737,15 @@ async function handleUpscaleCommand(model: string, options: UpscaleOptions, glob
       try {
         // Call appropriate API method
         if (model === 'upscale-fast') {
-          result = await api.upscaleFast(options.image, params.output_format as string);
+          result = await api.upscaleFast(options.image, params.output_format);
         } else if (model === 'upscale-conservative') {
-          result = await api.upscaleConservative(options.image, params as unknown as Parameters<typeof api.upscaleConservative>[1]);
+          result = await api.upscaleConservative(options.image, params);
         } else if (model === 'upscale-creative') {
-          result = await api.upscaleCreative(options.image, params as unknown as Parameters<typeof api.upscaleCreative>[1]) as ImageResult;
+          const upscaled = await api.upscaleCreative(options.image, params);
+          if (!isImageResult(upscaled)) {
+            throw new Error(`Creative upscale returned task ${upscaled.id} without an image`);
+          }
+          result = upscaled;
         } else {
           throw new Error(`Unknown model: ${model}`);
         }
@@ -856,7 +771,7 @@ async function handleUpscaleCommand(model: string, options: UpscaleOptions, glob
       logger.info('='.repeat(60));
 
     } catch (error) {
-      const err = error as Error;
+      const err = toError(error);
       logger.error('='.repeat(60));
       logger.error(`✗ Upscale failed: ${err.message}`);
       logger.error('='.repeat(60));
@@ -864,58 +779,10 @@ async function handleUpscaleCommand(model: string, options: UpscaleOptions, glob
     }
 
   } catch (error) {
-    const err = error as Error;
+    const err = toError(error);
     logger.error(`\n✗ Error: ${err.message}`);
     process.exit(1);
   }
-}
-
-/**
- * Save image result to disk with metadata
- */
-async function saveImageResult(
-  result: ImageResult,
-  prompt: string,
-  model: string,
-  params: Record<string, unknown>,
-  outputDir?: string
-): Promise<void> {
-  // Determine output directory
-  const baseDir = outputDir || getOutputDir();
-  const modelDir = path.join(baseDir, model);
-
-  // Ensure directory exists
-  await ensureDirectory(modelDir);
-
-  // Generate filename
-  const baseName = promptToFilename(prompt);
-  const extension = (params.output_format as string) || 'png';
-  const filename = generateTimestampedFilename(baseName, extension);
-  const imagePath = path.join(modelDir, filename);
-
-  // Save image
-  if (result.image) {
-    await writeToFile(result.image, imagePath);
-    logger.info(`✓ Image saved: ${imagePath}`);
-  }
-
-  // Save metadata
-  const metadataFilename = filename.replace(`.${extension}`, '_metadata.json');
-  const metadataPath = path.join(modelDir, metadataFilename);
-
-  const metadata = {
-    model,
-    timestamp: new Date().toISOString(),
-    parameters: params,
-    result: {
-      finish_reason: result.finish_reason,
-      seed: result.seed,
-      image_path: imagePath
-    }
-  };
-
-  await writeToFile(metadata, metadataPath);
-  logger.info(`✓ Metadata saved: ${metadataPath}`);
 }
 
 /**
@@ -943,7 +810,7 @@ async function handleCreditsCommand(globalOptions: GlobalOptions): Promise<void>
     logger.info('='.repeat(60));
 
   } catch (error) {
-    const err = error as Error;
+    const err = toError(error);
     logger.error(`Failed to fetch credits: ${err.message}`);
     process.exit(1);
   }
@@ -1005,22 +872,26 @@ async function handleEditCommand(operation: string, options: EditOptions, global
             result = await api.erase(options.image, params);
             break;
           case 'inpaint':
-            result = await api.inpaint(options.image, params.prompt as string, params);
+            result = await api.inpaint(options.image, requiredString(options.prompt, '--prompt'), params);
             break;
           case 'outpaint':
             result = await api.outpaint(options.image, params);
             break;
           case 'search-and-replace':
-            result = await api.searchAndReplace(options.image, params.prompt as string, params.search_prompt as string, params);
+            result = await api.searchAndReplace(options.image, requiredString(options.prompt, '--prompt'), requiredString(options.search, '--search'), params);
             break;
           case 'search-and-recolor':
-            result = await api.searchAndRecolor(options.image, params.prompt as string, params.select_prompt as string, params);
+            result = await api.searchAndRecolor(options.image, requiredString(options.prompt, '--prompt'), requiredString(options.select, '--select'), params);
             break;
           case 'remove-background':
             result = await api.removeBackground(options.image, params);
             break;
           case 'replace-background-and-relight':
-            result = await api.replaceBackgroundAndRelight(options.image, params) as ImageResult;
+            const relit = await api.replaceBackgroundAndRelight(options.image, params);
+            if (!isImageResult(relit)) {
+              throw new Error(`Replace background returned task ${relit.id} without an image`);
+            }
+            result = relit;
             break;
           default:
             throw new Error(`Unknown edit operation: ${operation}`);
@@ -1039,7 +910,7 @@ async function handleEditCommand(operation: string, options: EditOptions, global
       }
 
       // Save image
-      const promptText = (params.prompt as string) || path.basename(options.image, path.extname(options.image));
+      const promptText = options.prompt || path.basename(options.image, path.extname(options.image));
       const modelName = `edit-${operation.replace(/-and-/g, '-')}`;
       await saveImageResult(result, promptText, modelName, params, globalOptions.outputDir);
 
@@ -1048,7 +919,7 @@ async function handleEditCommand(operation: string, options: EditOptions, global
       logger.info('='.repeat(60));
 
     } catch (error) {
-      const err = error as Error;
+      const err = toError(error);
       logger.error('='.repeat(60));
       logger.error(`✗ Edit operation failed: ${err.message}`);
       logger.error('='.repeat(60));
@@ -1056,80 +927,10 @@ async function handleEditCommand(operation: string, options: EditOptions, global
     }
 
   } catch (error) {
-    const err = error as Error;
+    const err = toError(error);
     logger.error(`\n✗ Error: ${err.message}`);
     process.exit(1);
   }
-}
-
-/**
- * Build edit parameters from CLI options
- */
-function buildEditParams(operation: string, options: EditOptions): Record<string, unknown> {
-  const params: Record<string, unknown> = {
-    output_format: options.outputFormat || 'png'
-  };
-
-  // Common options
-  if (options.seed !== undefined) params.seed = options.seed;
-  if (options.negativePrompt) params.negative_prompt = options.negativePrompt;
-  if (options.stylePreset) params.style_preset = options.stylePreset;
-
-  // Operation-specific options
-  switch (operation) {
-    case 'erase':
-      if (options.mask) params.mask = options.mask;
-      if (options.growMask !== undefined) params.grow_mask = options.growMask;
-      break;
-
-    case 'inpaint':
-      params.prompt = options.prompt;
-      if (options.mask) params.mask = options.mask;
-      if (options.growMask !== undefined) params.grow_mask = options.growMask;
-      break;
-
-    case 'outpaint':
-      if (options.left !== undefined && options.left > 0) params.left = options.left;
-      if (options.right !== undefined && options.right > 0) params.right = options.right;
-      if (options.up !== undefined && options.up > 0) params.up = options.up;
-      if (options.down !== undefined && options.down > 0) params.down = options.down;
-      if (options.creativity !== undefined) params.creativity = options.creativity;
-      if (options.prompt) params.prompt = options.prompt;
-      break;
-
-    case 'search-and-replace':
-      params.prompt = options.prompt;
-      params.search_prompt = options.search;
-      if (options.growMask !== undefined) params.grow_mask = options.growMask;
-      break;
-
-    case 'search-and-recolor':
-      params.prompt = options.prompt;
-      params.select_prompt = options.select;
-      if (options.growMask !== undefined) params.grow_mask = options.growMask;
-      break;
-
-    case 'remove-background':
-      // Validate output format for remove-background
-      if (params.output_format === 'jpeg') {
-        throw new Error('Remove background does not support jpeg output (requires transparency). Use png or webp.');
-      }
-      break;
-
-    case 'replace-background-and-relight':
-      if (options.backgroundPrompt) params.background_prompt = options.backgroundPrompt;
-      if (options.backgroundReference) params.background_reference = options.backgroundReference;
-      if (options.foregroundPrompt) params.foreground_prompt = options.foregroundPrompt;
-      if (options.preserveSubject !== undefined) params.preserve_original_subject = options.preserveSubject;
-      if (options.backgroundDepth !== undefined) params.original_background_depth = options.backgroundDepth;
-      if (options.keepOriginalBg) params.keep_original_background = true;
-      if (options.lightDirection) params.light_source_direction = options.lightDirection;
-      if (options.lightReference) params.light_reference = options.lightReference;
-      if (options.lightStrength !== undefined) params.light_source_strength = options.lightStrength;
-      break;
-  }
-
-  return params;
 }
 
 /**
@@ -1233,17 +1034,17 @@ async function handleControlCommand(operation: string, options: ControlOptions, 
 
     // For style-transfer, validate both images exist
     if (operation === 'style-transfer') {
-      if (!existsSync(options.initImage!)) {
+      if (!options.initImage || !existsSync(options.initImage)) {
         logger.error(`Error: Init image file not found: ${options.initImage}`);
         process.exit(1);
       }
-      if (!existsSync(options.styleImage!)) {
+      if (!options.styleImage || !existsSync(options.styleImage)) {
         logger.error(`Error: Style image file not found: ${options.styleImage}`);
         process.exit(1);
       }
     } else {
       // Validate input image exists for other operations
-      if (!existsSync(options.image!)) {
+      if (!options.image || !existsSync(options.image)) {
         logger.error(`Error: Image file not found: ${options.image}`);
         process.exit(1);
       }
@@ -1290,16 +1091,16 @@ async function handleControlCommand(operation: string, options: ControlOptions, 
         // Call appropriate API method
         switch (operation) {
           case 'sketch':
-            result = await api.controlSketch(options.image!, params.prompt as string, params);
+            result = await api.controlSketch(requiredString(options.image, '--image'), requiredString(options.prompt, '--prompt'), params);
             break;
           case 'structure':
-            result = await api.controlStructure(options.image!, params.prompt as string, params);
+            result = await api.controlStructure(requiredString(options.image, '--image'), requiredString(options.prompt, '--prompt'), params);
             break;
           case 'style':
-            result = await api.controlStyle(options.image!, params.prompt as string, params);
+            result = await api.controlStyle(requiredString(options.image, '--image'), requiredString(options.prompt, '--prompt'), params);
             break;
           case 'style-transfer':
-            result = await api.controlStyleTransfer(options.initImage!, options.styleImage!, params);
+            result = await api.controlStyleTransfer(requiredString(options.initImage, '--init-image'), requiredString(options.styleImage, '--style-image'), params);
             break;
           default:
             throw new Error(`Unknown control operation: ${operation}`);
@@ -1312,7 +1113,7 @@ async function handleControlCommand(operation: string, options: ControlOptions, 
       }
 
       // Save image
-      const promptText = (params.prompt as string) || `control-${operation}`;
+      const promptText = options.prompt || `control-${operation}`;
       const modelName = `control-${operation}`;
       await saveImageResult(result, promptText, modelName, params, globalOptions.outputDir);
 
@@ -1321,7 +1122,7 @@ async function handleControlCommand(operation: string, options: ControlOptions, 
       logger.info('='.repeat(60));
 
     } catch (error) {
-      const err = error as Error;
+      const err = toError(error);
       logger.error('='.repeat(60));
       logger.error(`✗ Control operation failed: ${err.message}`);
       logger.error('='.repeat(60));
@@ -1329,48 +1130,10 @@ async function handleControlCommand(operation: string, options: ControlOptions, 
     }
 
   } catch (error) {
-    const err = error as Error;
+    const err = toError(error);
     logger.error(`\n✗ Error: ${err.message}`);
     process.exit(1);
   }
-}
-
-/**
- * Build control parameters from CLI options
- */
-function buildControlParams(operation: string, options: ControlOptions): Record<string, unknown> {
-  const params: Record<string, unknown> = {
-    output_format: options.outputFormat || 'png'
-  };
-
-  // Common options
-  if (options.seed !== undefined) params.seed = options.seed;
-  if (options.negativePrompt) params.negative_prompt = options.negativePrompt;
-  if (options.stylePreset) params.style_preset = options.stylePreset;
-
-  // Operation-specific options
-  switch (operation) {
-    case 'sketch':
-    case 'structure':
-      params.prompt = options.prompt;
-      if (options.controlStrength !== undefined) params.control_strength = options.controlStrength;
-      break;
-
-    case 'style':
-      params.prompt = options.prompt;
-      if (options.fidelity !== undefined) params.fidelity = options.fidelity;
-      if (options.aspectRatio) params.aspect_ratio = options.aspectRatio;
-      break;
-
-    case 'style-transfer':
-      if (options.prompt) params.prompt = options.prompt;
-      if (options.styleStrength !== undefined) params.style_strength = options.styleStrength;
-      if (options.compositionFidelity !== undefined) params.composition_fidelity = options.compositionFidelity;
-      if (options.changeStrength !== undefined) params.change_strength = options.changeStrength;
-      break;
-  }
-
-  return params;
 }
 
 /**

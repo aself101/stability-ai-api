@@ -40,15 +40,24 @@ if (existsSync(globalConfigPath)) {
   dotenv.config({ path: globalConfigPath });
 }
 
-// Stability AI API Base URL
+/** Stability AI REST API origin. Override per client with `new StabilityAPI({ baseUrl })` (HTTPS only). */
 export const BASE_URL = 'https://api.stability.ai';
 
-// Default polling configuration (for async operations like Creative Upscale)
-export const DEFAULT_POLL_INTERVAL = 10; // seconds (Stability AI recommends 10s)
-export const DEFAULT_TIMEOUT = 300; // seconds (5 minutes)
+/** Seconds between `waitForResult` polls of an async task (Stability recommends 10). */
+export const DEFAULT_POLL_INTERVAL = 10;
+/** Seconds `waitForResult` waits for an async task before giving up (5 minutes). */
+export const DEFAULT_TIMEOUT = 300;
+/**
+ * Consecutive transient failures `waitForResult` tolerates before throwing
+ * (override per call with `maxRetries`). Submissions are never retried.
+ */
 export const MAX_RETRIES = 3;
 
-// Model endpoints
+/**
+ * Paths for the generate and upscale endpoints, plus `results` (async polling),
+ * keyed by the names the CLI and validators use. `sd3` serves every SD 3.5
+ * variant; the variant is the `model` field.
+ */
 export const MODEL_ENDPOINTS: ModelEndpoints = {
   // Generate endpoints (all synchronous)
   'stable-image-ultra': '/v2beta/stable-image/generate/ultra',
@@ -160,13 +169,13 @@ export const ENDPOINT_FIELDS: Readonly<Record<string, EndpointFields>> = {
   },
 };
 
-// Valid aspect ratios for generate endpoints
+/** Aspect ratios the generate and control/style endpoints accept. */
 export const ASPECT_RATIOS = ['21:9', '16:9', '3:2', '5:4', '1:1', '4:5', '2:3', '9:16', '9:21'];
 
-// Valid output formats
+/** Output formats (`remove-background` accepts only png and webp). */
 export const OUTPUT_FORMATS = ['jpeg', 'png', 'webp'];
 
-// Valid style presets (all 17 available in API)
+/** The 17 style presets the API accepts wherever an endpoint takes `style_preset`. */
 export const STYLE_PRESETS = [
   'enhance', 'anime', 'photographic', 'digital-art', 'comic-book',
   'fantasy-art', 'line-art', 'analog-film', 'neon-punk', 'isometric',
@@ -174,7 +183,7 @@ export const STYLE_PRESETS = [
   'pixel-art', 'tile-texture'
 ];
 
-// Edit endpoints (6 synchronous, 1 asynchronous)
+/** Paths for the 7 edit endpoints. `replace-background-and-relight` is asynchronous. */
 export const EDIT_ENDPOINTS: EditEndpoints = {
   'erase': '/v2beta/stable-image/edit/erase',
   'inpaint': '/v2beta/stable-image/edit/inpaint',
@@ -185,7 +194,10 @@ export const EDIT_ENDPOINTS: EditEndpoints = {
   'replace-background-and-relight': '/v2beta/stable-image/edit/replace-background-and-relight' // async!
 };
 
-// Edit operation constraints
+/**
+ * Value constraints per edit operation, enforced by `validateEditParams`.
+ * Ranges and enums are checked against the live spec by `npm run check:spec`.
+ */
 export const EDIT_CONSTRAINTS: EditConstraints = {
   'erase': {
     grow_mask: { min: 0, max: 20, default: 5 },
@@ -250,7 +262,7 @@ export const EDIT_CONSTRAINTS: EditConstraints = {
   }
 };
 
-// Control endpoints (all synchronous)
+/** Paths for the 4 control endpoints (all synchronous). */
 export const CONTROL_ENDPOINTS: ControlEndpoints = {
   'sketch': '/v2beta/stable-image/control/sketch',
   'structure': '/v2beta/stable-image/control/structure',
@@ -258,7 +270,10 @@ export const CONTROL_ENDPOINTS: ControlEndpoints = {
   'style-transfer': '/v2beta/stable-image/control/style-transfer'
 };
 
-// Control operation constraints
+/**
+ * Value constraints per control operation, enforced by `validateControlParams`.
+ * Checked against the live spec by `npm run check:spec`.
+ */
 export const CONTROL_CONSTRAINTS: ControlConstraints = {
   'sketch': {
     promptMaxLength: 10000,
@@ -300,7 +315,10 @@ export const CONTROL_CONSTRAINTS: ControlConstraints = {
   }
 };
 
-// Model parameter constraints
+/**
+ * Value constraints per generate/upscale model, enforced by `validateModelParams`.
+ * Checked against the live spec by `npm run check:spec`.
+ */
 export const MODEL_CONSTRAINTS: ModelConstraints = {
   'stable-image-ultra': {
     promptMaxLength: 10000,

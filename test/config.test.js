@@ -990,3 +990,32 @@ describe('validateControlParams', () => {
     });
   });
 });
+
+// ==================== Exact seed boundaries (1.0) ====================
+// The API's seed range is 0..4294967294. Earlier tests used 5000000000, which
+// cannot tell `seed > max` from `seed >= max`; the ship pipeline's
+// test-architect mutated exactly that and it survived. Every validator and
+// every operation is pinned at the edges.
+describe('seed boundaries: 0 and 4294967294 accepted, -1 and 4294967295 rejected', () => {
+  const MAX_SEED = 4294967294;
+  const cases = [
+    ...Object.keys(MODEL_CONSTRAINTS).filter(k => MODEL_CONSTRAINTS[k].seed)
+      .map(k => [`model ${k}`, (seed) => validateModelParams(k, { seed })]),
+    ...Object.keys(EDIT_CONSTRAINTS).filter(k => EDIT_CONSTRAINTS[k].seed)
+      .map(k => [`edit ${k}`, (seed) => validateEditParams(k, { seed, prompt: 'p', search_prompt: 's', select_prompt: 's', left: 10, background_prompt: 'b' })]),
+    ...Object.keys(CONTROL_CONSTRAINTS).filter(k => CONTROL_CONSTRAINTS[k].seed)
+      .map(k => [`control ${k}`, (seed) => validateControlParams(k, { seed, prompt: 'p' })]),
+  ];
+  const seedErrors = (r) => r.errors.filter(e => /seed/i.test(e));
+
+  it('covers every validator that constrains seed', () => {
+    expect(cases).toHaveLength(15); // 5 model + 6 edit (remove-background has no seed) + 4 control
+  });
+
+  it.each(cases)('%s', (_name, validate) => {
+    expect(seedErrors(validate(0))).toEqual([]);
+    expect(seedErrors(validate(MAX_SEED))).toEqual([]);
+    expect(seedErrors(validate(MAX_SEED + 1))).toHaveLength(1);
+    expect(seedErrors(validate(-1))).toHaveLength(1);
+  });
+});
