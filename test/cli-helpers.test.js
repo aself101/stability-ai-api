@@ -19,6 +19,7 @@ import {
   requiredString,
   parseIntOption,
   parseFloatOption,
+  parseLogLevel,
   saveImageResult,
 } from '../src/cli-helpers.js';
 import { Command } from 'commander';
@@ -214,6 +215,12 @@ describe('saveImageResult', () => {
     }
   });
 
+  it('names the file from the image bytes when no format was requested (sai result saved WEBP as .png)', async () => {
+    const webp = Buffer.from('RIFF\x10\x00\x00\x00WEBPVP8 ', 'latin1');
+    const { imagePath } = await saveImageResult({ image: webp }, 'task-x', 'results', { task_id: 'x' }, dir);
+    expect(imagePath).toMatch(/\.webp$/);
+  });
+
   it('uses .png when no output_format was requested (the server default)', async () => {
     const { imagePath } = await saveImageResult({ image: PNG_BYTES }, 'p', 'stable-image-core', { prompt: 'p' }, dir);
     expect(imagePath).toMatch(/\.png$/);
@@ -280,5 +287,20 @@ describe('the CLI declares no option defaults', () => {
       .filter(Boolean)
       .filter(entry => !entry.startsWith('--log-level') && !entry.startsWith('-p, --prompt <text...>'));
     expect(withDefaults).toEqual([]);
+  });
+});
+
+describe('parseLogLevel under commander', () => {
+  const parse = (argv) => {
+    const program = new Command().exitOverride().configureOutput({ writeErr: () => {} });
+    program.option('--log-level <level>', '', parseLogLevel, 'info');
+    program.parse(['node', 'sai', ...argv]);
+    return program.opts().logLevel;
+  };
+  it.each([['DEBUG', 'debug'], ['Warn', 'warn'], ['error', 'error']])('%s → %s', (input, expected) => {
+    expect(parse(['--log-level', input])).toBe(expected);
+  });
+  it('rejects an unknown level', () => {
+    expect(() => parse(['--log-level', 'loud'])).toThrow();
   });
 });

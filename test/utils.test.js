@@ -870,6 +870,32 @@ describe('detectImageMime', () => {
   });
 });
 
+describe('readFromFile names the file on bad JSON', () => {
+  const dir = join(process.cwd(), 'test-readjson');
+  beforeEach(async () => { await fs.mkdir(dir, { recursive: true }); });
+  afterEach(async () => { await fs.rm(dir, { recursive: true, force: true }); });
+
+  it('an empty file', async () => {
+    const f = join(dir, 'empty.json');
+    await fs.writeFile(f, '  ');
+    await expect(readFromFile(f)).rejects.toThrow(`readFromFile: ${f} is empty`);
+  });
+
+  it('malformed JSON', async () => {
+    const f = join(dir, 'bad.json');
+    await fs.writeFile(f, '{ nope');
+    await expect(readFromFile(f)).rejects.toThrow(`readFromFile: ${f} is not valid JSON`);
+  });
+});
+
+describe('setLogLevel', () => {
+  it('lowercases and refuses unknown levels', () => {
+    setLogLevel('WARN');
+    expect(() => setLogLevel('loud')).toThrow(/Unknown log level/);
+    setLogLevel('warn');
+  });
+});
+
 // ==================== Binary round-trips (1.0) ====================
 // 0.4.0 treated only .png/.jpg/.jpeg as binary; a .webp image was written as
 // String(buffer), i.e. UTF-8 decoded, so every `--output-format webp` save

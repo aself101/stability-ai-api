@@ -11,7 +11,7 @@
 import path from 'path';
 import { InvalidArgumentError } from 'commander';
 import { getOutputDir } from './config.js';
-import { writeToFile, ensureDirectory, promptToFilename, generateTimestampedFilename, logger } from './utils.js';
+import { writeToFile, ensureDirectory, promptToFilename, generateTimestampedFilename, detectImageMime, logger } from './utils.js';
 import type { ImageResult, SD3Params, UpscaleParams } from './types/index.js';
 
 export interface GenerateOptions {
@@ -94,6 +94,19 @@ export function parseIntOption(value: string): number {
     throw new InvalidArgumentError(`"${value}" is not an integer.`);
   }
   return n;
+}
+
+/**
+ * Commander parser for --log-level: case-insensitive, and one of winston's
+ * levels. An unknown or uppercase level used to reach winston as given and
+ * silence every line, errors included.
+ */
+export function parseLogLevel(value: string): string {
+  const level = value.toLowerCase();
+  if (!(level in logger.levels)) {
+    throw new InvalidArgumentError(`use one of: ${Object.keys(logger.levels).join(', ')}.`);
+  }
+  return level;
 }
 
 /** Commander option parser for numbers: rejects NaN, Infinity and trailing junk ("0.5x"). */
@@ -274,6 +287,13 @@ export function buildControlParams(operation: string, options: ControlOptions): 
   return params;
 }
 
+const EXTENSION_BY_MIME: Record<string, string> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpeg',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+};
+
 /** The `output_format` a parameter object asked for, if it names one. */
 function outputFormatOf(params: object): string | undefined {
   return 'output_format' in params && typeof params.output_format === 'string' ? params.output_format : undefined;
@@ -301,7 +321,9 @@ export async function saveImageResult(
   const modelDir = path.join(outputDir || getOutputDir(), model);
   await ensureDirectory(modelDir);
 
-  const extension = outputFormatOf(params) || 'png';
+  // The requested format, else what the bytes are (a resumed task has no
+  // params; `sai result` used to save WEBP/JPEG bytes as .png), else png.
+  const extension = outputFormatOf(params) || EXTENSION_BY_MIME[detectImageMime(result.image)] || 'png';
   const filename = generateTimestampedFilename(promptToFilename(prompt), extension);
   const imagePath = path.join(modelDir, filename);
 

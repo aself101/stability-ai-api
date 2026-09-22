@@ -89,6 +89,11 @@ describe('async task responses', () => {
     expect(calls[0].init.body).toBeUndefined();
   });
 
+  it.each([['null'], ['42'], ['[1,2]']])('rejects a JSON %s body with StabilityResponseError (null used to crash on data.id)', async (body) => {
+    stubFetch(() => new Response(body, { status: 200, headers: { 'content-type': 'application/json' } }));
+    await expect(api.getResult('t')).rejects.toBeInstanceOf(StabilityResponseError);
+  });
+
   it('rejects a 200 that is neither an image nor JSON instead of returning garbage', async () => {
     stubFetch(() => new Response('<html>gateway</html>', { status: 200, headers: { 'content-type': 'text/html' } }));
 
@@ -123,6 +128,13 @@ describe('error mapping', () => {
 
     expect(error.status).toBe(400);
     expect(error.message).toBe('Invalid parameters: model: invalid enum value, seed: too big');
+  });
+
+  it('keeps the transport-level error as cause', async () => {
+    stubFetch(() => jsonResponse(500, { errors: ['x'] }));
+    const error = await api.generateCore({ prompt: 'p' }).catch(e => e);
+    expect(error.cause).toBeInstanceOf(StabilityHttpError);
+    expect(error.cause.status).toBe(500);
   });
 
   it('carries Retry-After on 429', async () => {
@@ -312,6 +324,29 @@ describe('waitForResult', () => {
 
     await api.waitForResult('t', { pollInterval: 0, timeout: 5, showSpinner: true });
     expect(write).toHaveBeenCalled();
+  });
+
+  it('a 200 JSON body with an id is final, not "in progress" (only a 202 keeps polling, per the spec)', async () => {
+    const calls = stubFetch(() => jsonResponse(200, { id: 't', errors: ['generation failed'] }));
+    const error = await api.waitForResult('t', opts).catch(e => e);
+    expect(error).toBeInstanceOf(StabilityResponseError);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('backs off exponentially between consecutive transient failures', async () => {
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+    stubFetch((_url, _init, i) => (i < 3 ? jsonResponse(503, {}) : imageResponse()));
+    await api.waitForResult('t', { ...opts, pollInterval: 0.01 });
+    const sleeps = setTimeoutSpy.mock.calls.map(([, ms]) => ms).filter(ms => ms >= 10 && ms <= 40);
+    expect(sleeps).toEqual([10, 20, 40]);
+    setTimeoutSpy.mockRestore();
+  });
+
+  it.each(['../../v1/user/balance', '..', 'a/b', 'a%2Fb', ''])('refuses task id %o before any request (path traversal)', async (id) => {
+    const calls = stubFetch(() => imageResponse());
+    await expect(api.waitForResult(id, opts)).rejects.toThrow('Invalid task id');
+    await expect(api.getResult(id)).rejects.toThrow('Invalid task id');
+    expect(calls).toHaveLength(0);
   });
 
   it('throws a permanent error immediately', async () => {

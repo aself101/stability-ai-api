@@ -335,4 +335,18 @@ from scripts. Alex chose the CLI exit code (2026-09-22).
 - **DNS rebinding** (#10): validation and download resolve separately.
 - **402 semantics** are mapped by HTTP convention; not confirmed that Stability uses
   402 for an empty balance.
+- **The final poll can get a tiny budget.** If the last sleep ends just before the
+  timeout, the last poll has milliseconds and reports `StabilityTaskTimeoutError`
+  even if the image finished in that window; `sai result <taskId>` recovers it.
+
+## 22. Task ids are validated before they are put in a URL
+
+`waitForResult`, `getResult` and `sai result` take an id that goes into
+`/v2beta/results/{id}` on an authenticated request. It must be one
+`[A-Za-z0-9_-]{1,128}` segment. **Why:** found by the ship pipeline's code-auditor
+(run #3): `sai result ../../v1/user/balance` was normalised by the URL parser to a
+different endpoint, carrying the API key. Stability's ids are 64-character hex
+(`GenerationID` in the spec); the check is looser than that on purpose, so a
+change in id length does not break resume, while still refusing `.`, `/` and `%`.
+
 

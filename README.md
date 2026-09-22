@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node.js Version](https://img.shields.io/node/v/stability-ai-api)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue.svg)](https://www.typescriptlang.org/)
-[![Tests](https://img.shields.io/badge/tests-496%20passing-brightgreen)](test/)
+[![Tests](https://img.shields.io/badge/tests-516%20passing-brightgreen)](test/)
 [![Coverage](https://img.shields.io/badge/coverage-94.0%25-brightgreen)](test/)
 
 A TypeScript/Node.js wrapper for the [Stability AI API](https://platform.stability.ai/docs/api-reference) that provides easy access to Stable Diffusion 3.5, image upscaling, editing, and control models. Generate stunning AI images, upscale, edit, and control them with professional quality through a simple command-line interface.
@@ -84,7 +84,7 @@ The Stability AI API provides access to state-of-the-art image generation and up
 - **Organized Storage** - Structured directories with timestamped files and metadata
 - **CLI Orchestration** - Command-line tool with subcommands for generation and upscaling
 - **Full TypeScript Support** - Complete type definitions for all API methods, parameters, and responses
-- **Comprehensive Testing** - 496 tests, 94.0% line coverage (api.ts 97.2%, cli-helpers.ts 100%, config.ts 92.9%, http.ts 91.2%, utils.ts 91.5%; measured at cfb34c8, 2026-09-22), no network access; a spec-drift check against the live API runs in CI
+- **Comprehensive Testing** - 516 tests, 94.0% line coverage (api.ts 97.2%, cli-helpers.ts 100%, config.ts 92.9%, http.ts 91.2%, utils.ts 91.5%; measured at cfb34c8, 2026-09-22), no network access; a spec-drift check against the live API runs in CI
 
 ### Endpoint Summary
 
@@ -1057,6 +1057,11 @@ sai result <taskId> [--timeout 600]
 
 Polls a creative-upscale or replace-background task whose polling timed out or failed
 (the id is printed with the error) and saves the image under `<output-dir>/results/`.
+
+### Output
+
+Progress goes to stdout; warnings and errors go to **stderr**. `--log-level` takes
+`error`, `warn`, `info` (default) or `debug`, in any case.
 
 ### Exit Codes
 

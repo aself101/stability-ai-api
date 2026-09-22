@@ -98,6 +98,12 @@ describe('constructor and the shared logger', () => {
   beforeEach(() => { saved = logger.level; });
   afterEach(() => { logger.level = saved; });
 
+  it('normalises the level passed and refuses an unknown one (either used to silence all output)', () => {
+    new StabilityAPI({ apiKey: KEY, logLevel: 'ERROR' });
+    expect(logger.level).toBe('error');
+    expect(() => new StabilityAPI({ apiKey: KEY, logLevel: 'LOUD' })).toThrow(/Unknown log level/);
+  });
+
   it('leaves the logger level alone unless a level is passed (it is shared module state)', () => {
     logger.level = 'error';
     new StabilityAPI(KEY);

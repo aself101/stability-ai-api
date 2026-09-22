@@ -33,6 +33,24 @@ export const MAX_DOWNLOAD_SIZE = 50 * 1024 * 1024;
  */
 export const DOWNLOAD_TIMEOUT_MS = 60000;
 
+/** Deadline for the DNS lookup in validateImageUrl. */
+const DNS_TIMEOUT_MS = 10_000;
+
+/** Reject if `promise` has not settled within `ms`. */
+async function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${what} timed out after ${ms}ms`)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /** Extensions `writeToFile`/`readFromFile` treat as binary in auto mode. */
 const BINARY_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif']);
 
@@ -51,7 +69,9 @@ const logger = winston.createLogger({
     })
   ),
   transports: [
-    new winston.transports.Console()
+    // Errors and warnings go to stderr, so they survive `sai … > out.log`
+    // and stay out of anything that parses stdout.
+    new winston.transports.Console({ stderrLevels: ['error', 'warn'] })
   ]
 });
 
@@ -257,7 +277,9 @@ export async function validateImageUrl(url: string): Promise<string> {
       // Every address, not the first: a name with one public and one private
       // record passed a first-address check, and the client may connect to
       // either.
-      addresses = await lookup(hostname, { all: true });
+      // Bounded: the OS resolver has no deadline of its own, and this runs
+      // before request()'s idle timer starts.
+      addresses = await withTimeout(lookup(hostname, { all: true }), DNS_TIMEOUT_MS, `DNS lookup for ${hostname}`);
     } catch (error) {
       if (errorCode(error) === 'ENOTFOUND') {
         logger.warn(`SECURITY: Domain ${hostname} could not be resolved`);
@@ -480,7 +502,14 @@ export async function readFromFile(filepath: string, fileFormat: FileFormat = 'a
     // Read based on format
     if (format === 'json') {
       const content = await fs.readFile(filepath, 'utf-8');
-      result = JSON.parse(content);
+      if (content.trim() === '') {
+        throw new Error(`readFromFile: ${filepath} is empty`);
+      }
+      try {
+        result = JSON.parse(content);
+      } catch (error) {
+        throw new Error(`readFromFile: ${filepath} is not valid JSON: ${toError(error).message}`, { cause: error });
+      }
     } else if (format === 'binary') {
       result = await fs.readFile(filepath);
     } else {
@@ -856,7 +885,12 @@ export async function buildFormData(
  * @param level - Log level (debug, info, warn, error)
  */
 export function setLogLevel(level: string): void {
-  logger.level = level.toLowerCase();
+  const normalized = level.toLowerCase();
+  // winston silently drops every line under an unknown level; refuse it instead.
+  if (!(normalized in logger.levels)) {
+    throw new RangeError(`Unknown log level "${level}" (use one of: ${Object.keys(logger.levels).join(', ')})`);
+  }
+  logger.level = normalized;
 }
 
 /**

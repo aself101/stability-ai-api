@@ -59,8 +59,8 @@ export class StabilityHttpError extends Error {
   readonly retryAfter?: number;
   readonly body?: unknown;
 
-  constructor(message: string, status: number, retryAfter?: number, body?: unknown) {
-    super(message);
+  constructor(message: string, status: number, retryAfter?: number, body?: unknown, cause?: unknown) {
+    super(message, cause === undefined ? undefined : { cause });
     this.name = 'StabilityHttpError';
     this.status = status;
     if (retryAfter !== undefined) this.retryAfter = retryAfter;
@@ -90,8 +90,8 @@ export class StabilityNetworkError extends Error {
 export class StabilityTimeoutError extends Error {
   readonly timeoutMs: number;
 
-  constructor(timeoutMs: number) {
-    super(`Request timed out after ${timeoutMs}ms without data`);
+  constructor(timeoutMs: number, cause?: unknown) {
+    super(`Request timed out after ${timeoutMs}ms without data`, cause === undefined ? undefined : { cause });
     this.name = 'StabilityTimeoutError';
     this.timeoutMs = timeoutMs;
   }
@@ -151,12 +151,12 @@ function causeCode(cause: unknown): string | undefined {
 
 /** Turn a thrown fetch/abort failure into one of our typed errors. */
 function asTypedError(error: unknown, timeoutMs: number, timedOut: boolean): Error {
-  if (timedOut) return new StabilityTimeoutError(timeoutMs);
+  if (timedOut) return new StabilityTimeoutError(timeoutMs, error);
   if (error instanceof StabilityHttpError || error instanceof StabilityNetworkError) return error;
 
   const err = error as { name?: string; message?: string; cause?: unknown };
   if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
-    return new StabilityTimeoutError(timeoutMs);
+    return new StabilityTimeoutError(timeoutMs, error);
   }
   // undici surfaces transport failures as TypeError('fetch failed') with the
   // real cause attached; the message itself carries nothing usable.
@@ -253,7 +253,7 @@ export async function request(
 
       if (REDIRECT_STATUSES.has(response.status)) {
         const location = response.headers.get('location');
-        if (!location) break; // a redirect status with no target: treat as final
+        if (!location) break; // a redirect status with no target: reported as a network error below
         if (hops >= maxRedirects) {
           throw new StabilityHttpError(
             `Too many redirects (limit ${maxRedirects}) starting from ${url}`,
@@ -300,6 +300,9 @@ export async function request(
 
     throw new StabilityNetworkError('Redirect response carried no Location header');
   } catch (error) {
+    // Abort on every failure path: a thrown redirect refusal or size-cap hit
+    // otherwise left the response body (and its socket) open until GC.
+    controller.abort();
     throw asTypedError(error, timeoutMs, timedOut);
   } finally {
     if (timer) clearTimeout(timer);

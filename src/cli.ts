@@ -45,6 +45,7 @@ import {
   requiredString,
   parseIntOption,
   parseFloatOption,
+  parseLogLevel,
   saveImageResult,
   type GenerateOptions,
   type UpscaleOptions,
@@ -58,7 +59,17 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 // In dev (src/), package.json is one level up; in dist/, it's also one level up
 const pkgPath = join(__dirname, '..', 'package.json');
-const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { version: string };
+function readVersion(): string {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(pkgPath, 'utf8'));
+    return typeof parsed === 'object' && parsed !== null && 'version' in parsed && typeof parsed.version === 'string'
+      ? parsed.version
+      : 'unknown';
+  } catch {
+    return 'unknown'; // a damaged install should still run; --version just can't say which
+  }
+}
+const pkg = { version: readVersion() };
 
 interface GlobalOptions {
   apiKey?: string;
@@ -235,7 +246,7 @@ program
   .version(pkg.version)
   .option('--api-key <key>', 'Stability AI API key (overrides env var)')
   .option('--output-dir <dir>', 'Output directory for generated images')
-  .option('--log-level <level>', 'Log level (debug, info, warn, error)', 'info')
+  .option('--log-level <level>', 'Log level (debug, info, warn, error; default info)', parseLogLevel, 'info')
   .option('--examples', 'Show usage examples and exit');
 
 /**
@@ -623,6 +634,19 @@ async function handleGenerateCommand(model: string, options: GenerateOptions, gl
     const prompts = options.prompt;
     if (!Array.isArray(prompts) || prompts.length === 0) {
       logger.error('Error: At least one prompt is required. Use -p or --prompt');
+      process.exit(1);
+    }
+
+    // Validate every prompt before the first request: a batch that fails on
+    // prompt N used to have billed prompts 1..N-1 already.
+    const invalid = prompts
+      .map((prompt, index) => ({ index, errors: validateModelParams(model, { ...buildGenerateParams(model, prompt, options) }).errors }))
+      .filter(entry => entry.errors.length > 0);
+    if (invalid.length > 0) {
+      logger.error('Parameter validation failed; nothing was submitted:');
+      for (const { index, errors } of invalid) {
+        errors.forEach(err => logger.error(`  - prompt ${index + 1}: ${err}`));
+      }
       process.exit(1);
     }
 
@@ -1252,7 +1276,8 @@ if (process.argv.includes('--examples')) {
 }
 
 // Parse command line arguments
-program.parse(process.argv);
+// parseAsync: the action handlers are async (parse() would drop their promises).
+await program.parseAsync(process.argv);
 
 // Show help if no arguments
 if (!process.argv.slice(2).length) {

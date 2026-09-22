@@ -126,6 +126,28 @@ the reasoning behind each change is in `docs/DECISIONS.md`.
 
 ### Fixed
 
+- **Security — task ids are validated before they reach a URL.** `waitForResult` /
+  `getResult` / `sai result` put the id into the results path unescaped, so
+  `sai result ../../v1/user/balance` resolved to a different authenticated endpoint.
+  Ids must now be a single `[A-Za-z0-9_-]` segment (Stability issues 64-character
+  hex ids). Found by the ship pipeline's code-auditor (run #3).
+- **`--log-level` in any other case, or an unknown level, silenced the CLI entirely** —
+  including errors: `sai --log-level ERROR …` exited 1 with no output. Levels are now
+  case-insensitive and validated (`setLogLevel`, the constructor's `logLevel`, and the
+  CLI flag); errors and warnings go to **stderr**.
+- While polling, only a 202 means "in progress" (per the spec); a 200 JSON body is final
+  and throws `StabilityResponseError`, instead of being polled to the timeout when it
+  happened to carry an `id`. A JSON `null`/array/number body throws the same error
+  instead of crashing on `data.id`.
+- Transient poll failures back off exponentially (the interval doubles per consecutive
+  failure), still capped by `Retry-After` and the overall timeout.
+- A multi-prompt `sai generate` validates every prompt before the first request; a
+  batch failing on prompt N used to have billed prompts 1..N-1.
+- `sai result` names the saved file from the image bytes (a resumed WEBP/JPEG was saved
+  as `.png`).
+- `readFromFile` names the file and tells an empty file from malformed JSON; wrapped HTTP
+  and timeout errors keep their `cause`; the DNS lookup in `validateImageUrl` has a 10 s
+  deadline; a failed request aborts its connection instead of leaving the socket to GC.
 - **Security — IPv6 addresses embedding an IPv4 address in hex form bypassed the SSRF
   check.** Node's URL parser rewrites `https://[::ffff:127.0.0.1]` to
   `[::ffff:7f00:1]`, and only the dotted form was recognised. IPv6 addresses are now

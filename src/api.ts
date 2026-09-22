@@ -14,7 +14,7 @@
  * console.log('Image URL:', result.image_url);
  */
 
-import { logger, buildFormData, createSpinner, toError } from './utils.js';
+import { logger, buildFormData, createSpinner, toError, setLogLevel } from './utils.js';
 import { request, requestJson, StabilityHttpError, StabilityNetworkError, StabilityTimeoutError } from './http.js';
 import { BASE_URL, MODEL_ENDPOINTS, EDIT_ENDPOINTS, CONTROL_ENDPOINTS, ENDPOINT_FIELDS, DEFAULT_POLL_INTERVAL, DEFAULT_TIMEOUT, MAX_RETRIES, imageToImageErrors } from './config.js';
 import type {
@@ -72,6 +72,18 @@ export function isTransientError(error: unknown): boolean {
   if (error instanceof StabilityHttpError) return TRANSIENT_STATUSES.has(error.status);
   if (error instanceof StabilityNetworkError) return error.retryable;
   return error instanceof StabilityTimeoutError;
+}
+
+/**
+ * A task id goes into the results URL path, so it must be a single plain
+ * segment. Stability issues 64-character alphanumeric ids; anything with `/`,
+ * `.` or `%` could steer the authenticated request elsewhere —
+ * `sai result ../../v1/user/balance` used to resolve to a different endpoint.
+ */
+function assertTaskId(taskId: string): void {
+  if (typeof taskId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(taskId)) {
+    throw new RangeError(`Invalid task id: ${JSON.stringify(taskId)}`);
+  }
 }
 
 /** Throw the collected validation errors, if any, before a request is made. */
@@ -189,9 +201,10 @@ export class StabilityAPI {
     this.apiKey = apiKey;
     this.baseUrl = baseUrl;
 
-    // Set log level
+    // Set log level (validated: an unknown or uppercase level used to be
+    // assigned as given, which silenced every log line — errors included)
     if (logLevel) {
-      logger.level = logLevel;
+      setLogLevel(logLevel);
     }
 
     logger.info(`Initialized Stability AI API client with base URL: ${baseUrl}`);
@@ -261,7 +274,7 @@ export class StabilityAPI {
       message = `Request failed with status code ${status}${Array.isArray(errors) ? `: ${errors.join(', ')}` : ''}`;
     }
     logger.error(`HTTP ${status}: ${JSON.stringify(body)}`);
-    return new StabilityHttpError(message, status, retryAfter, body);
+    return new StabilityHttpError(message, status, retryAfter, body, error);
   }
 
   /**
@@ -283,12 +296,12 @@ export class StabilityAPI {
    * @throws StabilityHttpError on a non-2xx response (see `_toApiError`)
    * @throws StabilityNetworkError / StabilityTimeoutError on transport failure
    */
-  private async _makeFormDataRequest(
+  private async _sendRaw(
     method: 'GET' | 'POST',
     endpoint: string,
     formData: FormData | null = null,
     options: { headers?: Record<string, string>; timeoutMs?: number } = {}
-  ): Promise<ImageResult | TaskResult | Record<string, unknown>> {
+  ): Promise<{ status: number; result: ImageResult | TaskResult | Record<string, unknown> }> {
     this._verifyApiKey();
 
     const url = `${this.baseUrl}${endpoint}`;
@@ -324,32 +337,51 @@ export class StabilityAPI {
     if (status === 200 && contentType.startsWith('image/')) {
       logger.info(`Received image response (${bytes.length} bytes)`);
       return {
-        image: bytes,
-        finish_reason: resHeaders.get('finish-reason') ?? undefined,
-        seed: resHeaders.get('seed') ?? undefined
+        status,
+        result: {
+          image: bytes,
+          finish_reason: resHeaders.get('finish-reason') ?? undefined,
+          seed: resHeaders.get('seed') ?? undefined
+        }
       };
     }
 
     const text = bytes.toString('utf8');
-    let data: Record<string, unknown> = {};
+    let parsed: unknown = {};
     if (text.length > 0) {
       try {
-        data = JSON.parse(text) as Record<string, unknown>;
+        parsed = JSON.parse(text) as unknown;
       } catch (error) {
         throw new StabilityNetworkError(`Expected an image or JSON from ${endpoint} but received ${contentType || 'no content-type'}: ${text.slice(0, 120)}`, undefined, error);
       }
     }
+    // A JSON body must be an object (`null`, a number or an array used to
+    // crash on `data.id` with an unlabelled TypeError).
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new StabilityResponseError(`Expected a JSON object from ${endpoint}`, parsed);
+    }
+    const data = parsed as Record<string, unknown>;
     if (status === 202) {
       if (!isTaskResult(data)) {
         throw new StabilityResponseError(`202 from ${endpoint} without a task id`, data);
       }
       logger.info('Received async task ID');
-      return data;
+      return { status, result: data };
     }
     if (typeof data.id === 'string') {
       logger.info(`Received async task ID: ${data.id}`);
     }
-    return data;
+    return { status, result: data };
+  }
+
+  /** `_sendRaw` for callers that do not need the status. */
+  private async _makeFormDataRequest(
+    method: 'GET' | 'POST',
+    endpoint: string,
+    formData: FormData | null = null,
+    options: { headers?: Record<string, string>; timeoutMs?: number } = {}
+  ): Promise<ImageResult | TaskResult | Record<string, unknown>> {
+    return (await this._sendRaw(method, endpoint, formData, options)).result;
   }
 
   /**
@@ -433,6 +465,7 @@ export class StabilityAPI {
     showSpinner = false,
     maxRetries = MAX_RETRIES
   }: WaitResultOptions = {}): Promise<ImageResult> {
+    assertTaskId(taskId);
     if (!Number.isFinite(timeout) || timeout <= 0) {
       throw new RangeError(`waitForResult: timeout must be a positive number of seconds, got ${timeout}`);
     }
@@ -465,7 +498,7 @@ export class StabilityAPI {
           // Bound each poll by the time left, not the 180 s submit budget:
           // one stalled poll could otherwise overrun `timeout` by minutes.
           const remainingForPoll = Math.max(1, timeoutMs - (Date.now() - startTime));
-          const result = await this._fetchResult(taskId, Math.min(API_TIMEOUT_MS, remainingForPoll));
+          const { status, result } = await this._fetchResult(taskId, Math.min(API_TIMEOUT_MS, remainingForPoll));
 
           // Check if task is complete (HTTP 200 with image)
           if (isImageResult(result)) {
@@ -479,8 +512,12 @@ export class StabilityAPI {
           // Still in progress: a 202 carries the task handle. Any other 2xx
           // body is final and not an image; until 1.0 it was re-polled until
           // the timeout and then discarded.
-          if (!isTaskResult(result)) {
-            throw new StabilityResponseError(`Task ${taskId} finished without an image`, result);
+          // Per the spec, the results endpoint answers 202 while in progress and
+          // 200 when finished; only a 202 keeps us polling. (A 200 JSON body
+          // with an id used to be taken for "in progress" and polled to the
+          // timeout.)
+          if (status !== 202 || !isTaskResult(result)) {
+            throw new StabilityResponseError(`Task ${taskId} finished without an image (HTTP ${status})`, result);
           }
           logger.debug(`Task ${taskId} still in progress...`);
           if (spinner) {
@@ -497,7 +534,10 @@ export class StabilityAPI {
             throw error;
           }
           const retryAfter = error instanceof StabilityHttpError ? error.retryAfter : undefined;
-          waitSeconds = Math.max(pollInterval, retryAfter ?? 0);
+          // Exponential backoff between consecutive transient failures (the
+          // interval doubles each time), never shorter than Retry-After and —
+          // below — never past the overall timeout.
+          waitSeconds = Math.max(pollInterval * 2 ** (consecutiveFailures - 1), retryAfter ?? 0);
           logger.warn(`Transient error (${consecutiveFailures}/${maxRetries}), retrying in ${waitSeconds}s: ${toError(error).message}`);
           if (spinner) {
             spinner.update(`Retrying after error...`);
@@ -529,14 +569,15 @@ export class StabilityAPI {
    * @returns Task result
    */
   async getResult(taskId: string): Promise<ImageResult | TaskResult | Record<string, unknown>> {
-    return await this._fetchResult(taskId, API_TIMEOUT_MS);
+    return (await this._fetchResult(taskId, API_TIMEOUT_MS)).result;
   }
 
   /** One results poll with an explicit idle timeout (see waitForResult). */
-  private async _fetchResult(taskId: string, timeoutMs: number): Promise<ImageResult | TaskResult | Record<string, unknown>> {
+  private async _fetchResult(taskId: string, timeoutMs: number): Promise<{ status: number; result: ImageResult | TaskResult | Record<string, unknown> }> {
+    assertTaskId(taskId);
     const endpoint = `${MODEL_ENDPOINTS.results}/${taskId}`;
     // Results endpoint requires accept: */* for binary response
-    return await this._makeFormDataRequest('GET', endpoint, null, {
+    return await this._sendRaw('GET', endpoint, null, {
       headers: { 'accept': '*/*' },
       timeoutMs,
     });
