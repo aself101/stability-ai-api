@@ -42,8 +42,18 @@ import type {
 
 export { StabilityHttpError, StabilityNetworkError, StabilityTimeoutError } from './http.js';
 
-/** Idle timeout for API requests (resets on each chunk; see src/http.ts). */
-const API_TIMEOUT_MS = 30000;
+/**
+ * Idle timeout for API requests (resets on each chunk; see src/http.ts).
+ *
+ * Stability's synchronous endpoints send no bytes until the image is ready, so
+ * for them this is a time-to-first-byte budget. 0.4.0 used 30 s (a total
+ * timeout under axios), and Ultra image-to-image exceeded it in the 1.0 live
+ * battery (2026-09-22) — the client gave up on a request the server may still
+ * have completed and billed. 180 s covers the slowest synchronous endpoints
+ * with margin; async endpoints (creative upscale, replace-background) return a
+ * task id immediately and are unaffected.
+ */
+const API_TIMEOUT_MS = 180_000;
 
 /** Statuses a poll may retry: throttling and gateway trouble, never client errors. */
 const TRANSIENT_STATUSES = new Set([429, 502, 503, 504]);

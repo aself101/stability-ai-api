@@ -20,7 +20,7 @@ semantic-release from commit subjects and are kept as they were.
   `Request failed with status code <n>[: <server errors>]` outside production; in
   production they keep the generic message, with detail on `error.body`.
 - Timeouts are **idle** timeouts (reset on each chunk received), not total-request
-  timeouts: 30 s for API calls, 60 s (`DOWNLOAD_TIMEOUT_MS`) for image downloads.
+  timeouts: 180 s for API calls, 60 s (`DOWNLOAD_TIMEOUT_MS`) for image downloads.
 - `waitForResult` retries on type, never on message text: 429 (honouring
   `Retry-After`), 502, 503, 504, retryable network errors and timeouts, up to
   `maxRetries` consecutive failures. See *Fixed* for what 0.4.0 actually did.
@@ -77,6 +77,10 @@ semantic-release from commit subjects and are kept as they were.
 
 ### Fixed
 
+- **Ultra image-to-image timed out.** API calls had a 30 s timeout, and synchronous
+  endpoints send nothing until the image is done; Ultra image-to-image took longer in
+  the 1.0 live battery. The client gave up on a request the server may still have
+  finished — and billed. The budget is now 180 s.
 - Ultra no longer sends `strength` without an image, and `sai generate ultra
   --strength` without `--image` is an error instead of being dropped silently. An
   image without `strength` is also rejected; the API requires both together.

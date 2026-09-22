@@ -73,7 +73,7 @@ The Stability AI API provides access to state-of-the-art image generation and up
 
 - **17 Endpoints** - 3 Generate + 3 Upscale + 7 Edit + 4 Control operations
 - **Production Security** - API key redaction, error sanitization, HTTPS enforcement, comprehensive SSRF protection (including IPv4-mapped IPv6 bypass prevention)
-- **DoS Prevention** - Request timeouts (30s API calls), file size limits (50MB), redirect limits
+- **DoS Prevention** - Request timeouts (180 s time-to-first-byte for API calls, 60 s idle for downloads), file size limits (50MB), redirect limits
 - **Parameter Validation** - Pre-flight validation catches invalid parameters before API calls
 - **API Key Authentication** - Multiple configuration methods with secure handling
 - **Auto-polling with Spinner** - Automatic result polling for async operations with progress indicator
@@ -159,7 +159,7 @@ Credit costs are from the API reference as of 2026-09-22.
 - `negative_prompt` - What to avoid
 - `aspect_ratio` - Image proportions (1:1, 16:9, 21:9, 2:3, 3:2, 4:5, 5:4, 9:16, 9:21) — **text-to-image only**
 - `image` - Input image. Setting it makes the request image-to-image; requires `strength`
-- `strength` - Image-to-image strength (0-1: 0 keeps the input, 1 ignores it). For Flash the API suggests 0.94-0.97
+- `strength` - Image-to-image strength (0-1: 0 keeps the input, 1 ignores it). For Flash the API suggests 0.94-0.97; in the 1.0 live battery that range discarded the input's composition, while 0.6 kept it. Use the high range for restyling with a descriptive prompt, not for edits
 - `cfg_scale` - Prompt adherence (1-10; server default 4 for Large/Medium, 1 for Turbo/Flash)
 - `style_preset` - Style preset (same 17 presets as Core)
 - `seed` - Random seed (0 to 4,294,967,294)
@@ -1237,7 +1237,7 @@ datasets/
 - Only allows HTTPS URLs for remote images
 
 ### DoS Prevention
-- Request timeout: 30 seconds for API calls
+- Request timeout: 180 seconds without data for API calls (synchronous endpoints send nothing until the image is ready)
 - File size limit: 50MB maximum for image processing
 - Redirect limit: Maximum 5 redirects
 - Prevents resource exhaustion attacks
