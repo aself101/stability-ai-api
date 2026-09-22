@@ -1,0 +1,25 @@
+# Line endings.
+#
+# Seven files (src/*.ts, CHANGELOG.md, tsconfig.json) were CRLF against an
+# otherwise-LF repo with no .gitattributes — the same drift bfl-api normalised in
+# e0c80c7. Any tool that rewrote a file flipped its endings and turned a
+# one-line change into a whole-file diff (found during the 1.0 fetch migration).
+#
+# Store text as LF in the repo and check it out as LF everywhere. This is a
+# Node CLI targeting macOS/Linux; there is no Windows-tooling reason to keep CRLF.
+* text=auto eol=lf
+
+# Binary: never touch these.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.webp  binary
+*.gif   binary
+*.mp4   binary
+*.bin   binary
+*.tgz   binary
+*.ico   binary
+
+# Generated / vendored — keep diffs collapsed in review.
+package-lock.json               linguist-generated=true
+docs/openapi-snapshot-*.json    linguist-generated=true
