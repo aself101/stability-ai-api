@@ -199,8 +199,9 @@ message, which production sanitising replaced. `MAX_RETRIES` was declared and ne
 read.
 
 Retries happen only inside `waitForResult`: `maxRetries` consecutive failures
-(default 3), a budget that resets after any successful poll, and a wait of
-`max(pollInterval, Retry-After)`.
+(default 3), a budget that resets after any successful poll, and a wait that
+starts at `pollInterval`, doubles with each consecutive failure (ship run #3),
+is never shorter than `Retry-After`, and never runs past the overall timeout.
 
 **Submissions are never retried.** A generate/edit/control/upscale call is a paid
 operation, and a timeout or a 502 does not prove the server did no work, so an

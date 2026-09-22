@@ -10,7 +10,9 @@ semantic-release from commit subjects and are kept as they were.
 
 Brings the wrapper to the bfl-api 2.0 / kling-api 2.0 baseline and the current Stability API.
 Every endpoint and SD 3.5 model was run live against production (`docs/LIVE-BATTERY-2026-09-22.md`);
-paths changed afterwards were re-run live at the commit that changed them (addenda 1 and 2);
+the synchronous and async paths were re-run live after the main rewrites (addenda 1–3, the last at
+`90fad5a`). Changes after that — documentation, error typing, and accepting image bytes under a
+non-image content type — are covered by tests, not by a further live run;
 the reasoning behind each change is in `docs/DECISIONS.md`.
 
 ### Changed
@@ -139,8 +141,12 @@ the reasoning behind each change is in `docs/DECISIONS.md`.
   and throws `StabilityResponseError`, instead of being polled to the timeout when it
   happened to carry an `id`. A JSON `null`/array/number body throws the same error
   instead of crashing on `data.id`.
+- A 2xx body that is neither an image nor JSON throws `StabilityResponseError` (a response
+  arrived) rather than `StabilityNetworkError` ("no response"); image bytes served under a
+  non-image content type (e.g. `application/octet-stream`) are recognised by their magic
+  bytes and returned as the image.
 - Transient poll failures back off exponentially (the interval doubles per consecutive
-  failure), still capped by `Retry-After` and the overall timeout.
+  failure), never shorter than `Retry-After` and never past the overall timeout.
 - A multi-prompt `sai generate` validates every prompt before the first request; a
   batch failing on prompt N used to have billed prompts 1..N-1.
 - `sai result` names the saved file from the image bytes (a resumed WEBP/JPEG was saved

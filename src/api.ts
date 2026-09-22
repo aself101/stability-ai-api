@@ -11,10 +11,10 @@
  *
  * // Generate image
  * const result = await api.generateUltra({ prompt: 'a beautiful landscape' });
- * console.log('Image URL:', result.image_url);
+ * // result.image is a Buffer; result.finish_reason and result.seed come from headers
  */
 
-import { logger, buildFormData, createSpinner, toError, setLogLevel } from './utils.js';
+import { logger, buildFormData, createSpinner, toError, setLogLevel, detectImageMime } from './utils.js';
 import { request, requestJson, StabilityHttpError, StabilityNetworkError, StabilityTimeoutError } from './http.js';
 import { BASE_URL, MODEL_ENDPOINTS, EDIT_ENDPOINTS, CONTROL_ENDPOINTS, ENDPOINT_FIELDS, DEFAULT_POLL_INTERVAL, DEFAULT_TIMEOUT, MAX_RETRIES, imageToImageErrors } from './config.js';
 import type {
@@ -166,8 +166,9 @@ export class StabilityAPI {
    * Create a new Stability AI API client.
    *
    * Takes the key positionally or an options object. With no key, falls back
-   * to `STABILITY_API_KEY` (the environment, or a `.env` loaded by the config
-   * module). A missing key is reported on the first request, not here.
+   * to the `STABILITY_API_KEY` environment variable. The library never reads
+   * `.env` files itself (call `loadEnvFiles()` from `stability-ai-api/config`
+   * to opt in). A missing key is reported on the first request, not here.
    *
    * Until 1.0 the key was a required positional string, while the README showed
    * `new StabilityAPI()` and `new StabilityAPI({ apiKey })` — the first failed
@@ -334,7 +335,10 @@ export class StabilityAPI {
     const contentType = resHeaders.get('content-type') ?? '';
     logger.debug(`Response status: ${status}, content-type: ${contentType}`);
 
-    if (status === 200 && contentType.startsWith('image/')) {
+    // An image is an image whatever the label: accept image bytes served under
+    // another content type (e.g. application/octet-stream) rather than
+    // discarding a result that was already billed.
+    if (status === 200 && (contentType.startsWith('image/') || detectImageMime(bytes) !== '')) {
       logger.info(`Received image response (${bytes.length} bytes)`);
       return {
         status,
@@ -352,7 +356,9 @@ export class StabilityAPI {
       try {
         parsed = JSON.parse(text) as unknown;
       } catch (error) {
-        throw new StabilityNetworkError(`Expected an image or JSON from ${endpoint} but received ${contentType || 'no content-type'}: ${text.slice(0, 120)}`, undefined, error);
+        // A response arrived, so this is not a network error (StabilityNetworkError
+        // means "no response"): it is a response of the wrong shape.
+        throw new StabilityResponseError(`Expected an image or JSON from ${endpoint} but received ${contentType || 'no content-type'}: ${text.slice(0, 120)}`, text.slice(0, 2000));
       }
     }
     // A JSON body must be an object (`null`, a number or an array used to

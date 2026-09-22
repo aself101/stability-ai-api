@@ -4,8 +4,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node.js Version](https://img.shields.io/node/v/stability-ai-api)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue.svg)](https://www.typescriptlang.org/)
-[![Tests](https://img.shields.io/badge/tests-516%20passing-brightgreen)](test/)
-[![Coverage](https://img.shields.io/badge/coverage-94.0%25-brightgreen)](test/)
+[![Tests](https://img.shields.io/badge/tests-517%20passing-brightgreen)](test/)
+[![Coverage](https://img.shields.io/badge/coverage-94.4%25-brightgreen)](test/)
 
 A TypeScript/Node.js wrapper for the [Stability AI API](https://platform.stability.ai/docs/api-reference) that provides easy access to Stable Diffusion 3.5, image upscaling, editing, and control models. Generate stunning AI images, upscale, edit, and control them with professional quality through a simple command-line interface.
 
@@ -84,7 +84,7 @@ The Stability AI API provides access to state-of-the-art image generation and up
 - **Organized Storage** - Structured directories with timestamped files and metadata
 - **CLI Orchestration** - Command-line tool with subcommands for generation and upscaling
 - **Full TypeScript Support** - Complete type definitions for all API methods, parameters, and responses
-- **Comprehensive Testing** - 516 tests, 94.0% line coverage (api.ts 97.2%, cli-helpers.ts 100%, config.ts 92.9%, http.ts 91.2%, utils.ts 91.5%; measured at cfb34c8, 2026-09-22), no network access; a spec-drift check against the live API runs in CI
+- **Comprehensive Testing** - 517 tests, 94.4% line coverage (api.ts 97.3%, cli-helpers.ts 100%, config.ts 93.8%, http.ts 91.3%, utils.ts 91.9%; measured at the release commit, 2026-09-22), no network access; a spec-drift check against the live API runs in CI
 
 ### Endpoint Summary
 
@@ -551,7 +551,7 @@ const { valid, errors } = validateModelParams('sd3', { model: 'sd3.5-flash', cfg
 | `imageToBase64`, `fileToBase64`, `urlToBase64`, `downloadImage` | The same, as base64 or to disk |
 | `buildFormData`, `detectImageMime` | Build a multipart body with typed image parts |
 | `writeToFile`, `readFromFile`, `ensureDirectory` | File I/O; Buffers are always written as binary |
-| `validateImagePath`, `validateImageFile` | Local input checks (existence, magic bytes, size/dimensions) |
+| `validateImagePath`, `validateImageFile` | Local input checks: existence, magic bytes, byte size, extension (pixel dimensions are checked by the server, not locally) |
 | `promptToFilename`, `generateTimestampedFilename`, `createSpinner`, `pause`, `randomNumber` | Small helpers the CLI uses |
 | `toError`, `errorCode` | Narrow a caught `unknown` to an `Error` / its Node error code |
 | `logger`, `setLogLevel` | The shared winston logger |
@@ -930,7 +930,7 @@ try {
     switch (error.status) {
       case 400: console.error(error.message); break;          // "Invalid parameters: <server errors>"
       case 401: console.error('Check your API key'); break;
-      case 402: console.error('Insufficient credits'); break;
+      case 402: console.error('Payment required (likely insufficient credits)'); break;
       case 403: console.error('Rejected by content moderation'); break;
       case 429: console.error(`Rate limited; retry after ${error.retryAfter ?? '?'}s`); break;
       default:  console.error('API error', error.status, error.body);
@@ -963,7 +963,7 @@ replace-background-and-relight):
 | Retried | `429`, `502`, `503`, `504`, retryable network errors (`ECONNRESET`, `UND_ERR_SOCKET`, …), idle timeouts |
 | Not retried | every other status, including `400`, `401`, `402`, `403`, `500` |
 | Budget | `maxRetries` **consecutive** transient failures (default 3); resets after any successful poll; `0` disables |
-| Wait | `pollInterval`, or `Retry-After` if the server asks for longer — no exponential backoff |
+| Wait | `pollInterval`, doubling with each consecutive failure; never less than `Retry-After`, never past `timeout` |
 
 ```javascript
 const result = await api.waitForResult(taskId, {
@@ -1387,10 +1387,15 @@ sai generate ultra --api-key "your-key" --prompt "test"
 - Check creativity is between 0.1 and 0.5 (Creative Upscale) or 0.2 and 0.5 (Conservative Upscale)
 - Conservative and Creative Upscale require `--prompt`
 
-**Rate Limit Exceeded:**
-- The service automatically retries on transient errors
-- Check your API usage limits at Stability AI dashboard
-- Wait a few moments before retrying
+**Rate Limit Exceeded (429):**
+- Generation, edit, control and upscale **submissions are not retried** (each is a paid call); wait and run again
+- Only polling of async tasks retries a 429 automatically (see Retry Behavior)
+- Check your API usage limits on the Stability AI dashboard
+
+**Timed out ("Request timed out after 180000ms without data"):**
+- The request was abandoned client-side after 180 s with no response. The server may
+  still have completed it — **and billed it** — but a synchronous call leaves no task
+  id to recover it. Check the account dashboard before re-running a paid request.
 
 **Image File Not Found:**
 ```bash

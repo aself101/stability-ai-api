@@ -95,3 +95,19 @@ Both outputs checked visually. With these, every code path that changed after th
 original battery has run live at or after the commit that changed it: the synchronous
 response path (`36719d3`) by the SD 3.5 Flash webp run, and the async submit/poll/resume
 paths plus the new CLI number parsers (`45941cf`) here.
+
+## Addendum 3 — polling status sequence at `90fad5a`
+
+Ship run #3's anxiety-reader noted that `90fad5a` tightened the polling rule (only a 202
+means "in progress", per the spec) after addendum 2, and that the earlier code could not
+have told a 200-in-progress from a 202. One replace-background run at `90fad5a`, with
+`--log-level debug`, recorded every response status:
+
+| step | status | content-type |
+|---|---|---|
+| submit | 200 | application/json (`{ id }`) |
+| poll (in progress) | **202** | application/json |
+| poll (finished) | 200 | image/png |
+
+Exit 0, image saved, task complete in 10.6 s; 8 list credits. The server answers exactly
+as the spec says, which is the behaviour the 202-only rule depends on.

@@ -97,7 +97,14 @@ describe('async task responses', () => {
   it('rejects a 200 that is neither an image nor JSON instead of returning garbage', async () => {
     stubFetch(() => new Response('<html>gateway</html>', { status: 200, headers: { 'content-type': 'text/html' } }));
 
-    await expect(api.getResult('t')).rejects.toBeInstanceOf(StabilityNetworkError);
+    // A response arrived: StabilityResponseError, not StabilityNetworkError ("no response")
+    await expect(api.getResult('t')).rejects.toBeInstanceOf(StabilityResponseError);
+  });
+
+  it('accepts image bytes served under a non-image content type (the result was billed)', async () => {
+    stubFetch(() => new Response(PNG_BYTES, { status: 200, headers: { 'content-type': 'application/octet-stream' } }));
+    const result = await api.generateCore({ prompt: 'p' });
+    expect(result.image.equals(PNG_BYTES)).toBe(true);
   });
 });
 

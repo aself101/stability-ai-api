@@ -515,7 +515,11 @@ export interface ValidationResult {
  * Options for waitForResult polling.
  */
 export interface WaitResultOptions {
-  /** Seconds between polls */
+  /**
+   * Seconds between polls (default 10). Transient failures back off from this
+   * value (doubling per consecutive failure), so 0 retries without any delay
+   * unless the server sends Retry-After — use 0 only against a local stub.
+   */
   pollInterval?: number;
   /** Maximum wait time in seconds */
   timeout?: number;
