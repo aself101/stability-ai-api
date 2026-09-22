@@ -239,6 +239,9 @@ export const EDIT_CONSTRAINTS: EditConstraints = {
     original_background_depth: { min: 0, max: 1, default: 0.5 },
     light_source_strength: { min: 0, max: 1, default: 0.3 },
     light_source_directions: ['left', 'right', 'above', 'below'],
+    // The API takes the strings 'true'/'false'; the wrapper's boolean
+    // parameter stringifies to exactly those (buildFormData).
+    keep_original_background: ['true', 'false'],
     seed: { min: 0, max: 4294967294 },
     outputFormats: OUTPUT_FORMATS,
     pixels: { min: 4096, max: 9437184 },

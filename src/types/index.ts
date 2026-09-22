@@ -127,6 +127,7 @@ export interface EditConstraint {
   original_background_depth?: RangeConstraint;
   light_source_strength?: RangeConstraint;
   light_source_directions?: string[];
+  keep_original_background?: string[];
   async?: boolean;
 }
 

@@ -44,6 +44,15 @@ semantic-release from commit subjects and are kept as they were.
 
 ### Added
 
+- `npm run check:spec` (`scripts/check-spec-drift.ts`): compares `ENDPOINT_FIELDS` and the
+  constraint tables with Stability's live OpenAPI spec — every field, part kind (text vs
+  file), range, enum and prompt length — and fails on drift. `--control` seeds seven
+  kinds of drift and requires each to be caught; `--snapshot` runs offline against
+  `docs/openapi-snapshot-2026-09-22.json`. Deliberate differences live in
+  `KNOWN_DIVERGENCES` with a reason, and an entry that stops matching is itself a
+  failure.
+- `npm run verify` and `.github/workflows/ci.yml` (Node 22): build → drift-check control →
+  drift check → tests. CI verifies; it does not publish.
 - **SD 3.5 Flash** (`model: 'sd3.5-flash'`, 2.5 credits, distilled from Medium). It is
   missing from the published OpenAPI `model` enum, but the server's own validator lists
   and accepts it (probed 2026-09-22), and the spec's prose and pricing name it.

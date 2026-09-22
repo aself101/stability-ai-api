@@ -55,7 +55,11 @@
     "test:watch": "vitest watch",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "check:spec": "tsx scripts/check-spec-drift.ts",
+    "check:spec:snapshot": "tsx scripts/check-spec-drift.ts --snapshot docs/openapi-snapshot-2026-09-22.json",
+    "check:spec:control": "tsx scripts/check-spec-drift.ts --control",
+    "verify": "npm run build && npm run check:spec:control && npm run check:spec && npm test"
   },
   "keywords": [
     "stability-ai",
