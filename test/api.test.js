@@ -3,9 +3,13 @@
  * Tests for StabilityAPI class and its methods
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { mkdtempSync, writeFileSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { StabilityAPI } from '../src/api.js';
 import { BASE_URL } from '../src/config.js';
+import { stubFetch, imageResponse, formFields, PNG_BYTES } from './helpers/fetch-mock.js';
 
 describe('StabilityAPI Class', () => {
   let api;
@@ -495,88 +499,81 @@ describe('Edit Methods', () => {
     });
   });
 
-  describe('removeBackground validation', () => {
-    it('should throw error for jpeg output format', async () => {
-      await expect(api.removeBackground('/path/to/image.png', { output_format: 'jpeg' }))
-        .rejects.toThrow('jpeg');
+  // Validation tests run the real builder against a real (tiny) file and a
+  // stubbed fetch, so "accepted" is proven by a request being sent — not by the
+  // absence of one error message. Until 1.0 these used a nonexistent path and
+  // `catch (e) { expect(e.message).not.toContain(...) }`, which passed on any
+  // error; with buildFormData's leaked mock the request actually went out to
+  // api.stability.ai (caught by test/setup.js).
+  describe('validation against the real request path', () => {
+    let dir;
+    let png;
+    let calls;
+
+    beforeEach(() => {
+      vi.restoreAllMocks(); // drop buildFormData/_makeFormDataRequest spies from sibling suites
+      dir = mkdtempSync(join(tmpdir(), 'sai-api-validation-'));
+      png = join(dir, 'in.png');
+      writeFileSync(png, PNG_BYTES);
+      calls = stubFetch(() => imageResponse());
     });
 
-    it('should accept png output format', async () => {
-      // Will fail due to missing file, but shouldn't throw format error
-      try {
-        await api.removeBackground('/path/to/image.png', { output_format: 'png' });
-      } catch (error) {
-        expect(error.message).not.toContain('jpeg');
-      }
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      rmSync(dir, { recursive: true, force: true });
     });
 
-    it('should accept webp output format', async () => {
-      // Will fail due to missing file, but shouldn't throw format error
-      try {
-        await api.removeBackground('/path/to/image.png', { output_format: 'webp' });
-      } catch (error) {
-        expect(error.message).not.toContain('jpeg');
-      }
-    });
-  });
+    const sentTo = (endpoint) => {
+      expect(calls).toHaveLength(1);
+      expect(calls[0].url).toBe(`${BASE_URL}${endpoint}`);
+      return formFields(calls[0].init);
+    };
 
-  describe('replaceBackgroundAndRelight validation', () => {
-    it('should require background_prompt or background_reference', async () => {
-      await expect(api.replaceBackgroundAndRelight('/path/to/image.png', {}))
-        .rejects.toThrow('background_prompt or background_reference');
-    });
+    describe('removeBackground', () => {
+      it('rejects jpeg output before any request', async () => {
+        await expect(api.removeBackground(png, { output_format: 'jpeg' })).rejects.toThrow('jpeg');
+        expect(calls).toHaveLength(0);
+      });
 
-    it('should accept background_prompt', async () => {
-      // Will fail due to missing file, but shouldn't throw validation error
-      try {
-        await api.replaceBackgroundAndRelight('/path/to/image.png', {
-          background_prompt: 'sunset beach'
-        });
-      } catch (error) {
-        expect(error.message).not.toContain('background_prompt or background_reference');
-      }
+      it.each(['png', 'webp'])('sends %s output', async (output_format) => {
+        await api.removeBackground(png, { output_format });
+        expect(sentTo('/v2beta/stable-image/edit/remove-background').output_format).toBe(output_format);
+      });
     });
 
-    it('should accept background_reference', async () => {
-      // Will fail due to missing file, but shouldn't throw validation error
-      try {
-        await api.replaceBackgroundAndRelight('/path/to/image.png', {
-          background_reference: '/path/to/bg.jpg'
-        });
-      } catch (error) {
-        expect(error.message).not.toContain('background_prompt or background_reference');
-      }
-    });
+    describe('replaceBackgroundAndRelight', () => {
+      const endpoint = '/v2beta/stable-image/edit/replace-background-and-relight';
 
-    it('should require light_reference or light_source_direction for light_source_strength', async () => {
-      await expect(api.replaceBackgroundAndRelight('/path/to/image.png', {
-        background_prompt: 'test',
-        light_source_strength: 0.5
-      })).rejects.toThrow('light_source_strength requires');
-    });
+      it('requires background_prompt or background_reference, before any request', async () => {
+        await expect(api.replaceBackgroundAndRelight(png, {})).rejects.toThrow('background_prompt or background_reference');
+        expect(calls).toHaveLength(0);
+      });
 
-    it('should accept light_source_strength with light_source_direction', async () => {
-      try {
-        await api.replaceBackgroundAndRelight('/path/to/image.png', {
-          background_prompt: 'test',
-          light_source_direction: 'right',
-          light_source_strength: 0.5
-        });
-      } catch (error) {
-        expect(error.message).not.toContain('light_source_strength requires');
-      }
-    });
+      it('sends with background_prompt alone', async () => {
+        await api.replaceBackgroundAndRelight(png, { background_prompt: 'sunset beach' });
+        expect(sentTo(endpoint)).toMatchObject({ background_prompt: 'sunset beach' });
+      });
 
-    it('should accept light_source_strength with light_reference', async () => {
-      try {
-        await api.replaceBackgroundAndRelight('/path/to/image.png', {
-          background_prompt: 'test',
-          light_reference: '/path/to/light.jpg',
-          light_source_strength: 0.5
-        });
-      } catch (error) {
-        expect(error.message).not.toContain('light_source_strength requires');
-      }
+      it('sends with background_reference alone', async () => {
+        await api.replaceBackgroundAndRelight(png, { background_reference: png });
+        expect(sentTo(endpoint).background_reference).toMatchObject({ type: 'image/png' });
+      });
+
+      it('requires light_reference or light_source_direction for light_source_strength', async () => {
+        await expect(api.replaceBackgroundAndRelight(png, { background_prompt: 't', light_source_strength: 0.5 }))
+          .rejects.toThrow('light_source_strength requires');
+        expect(calls).toHaveLength(0);
+      });
+
+      it('sends light_source_strength with light_source_direction', async () => {
+        await api.replaceBackgroundAndRelight(png, { background_prompt: 't', light_source_direction: 'right', light_source_strength: 0.5 });
+        expect(sentTo(endpoint)).toMatchObject({ light_source_direction: 'right', light_source_strength: '0.5' });
+      });
+
+      it('sends light_source_strength with light_reference', async () => {
+        await api.replaceBackgroundAndRelight(png, { background_prompt: 't', light_reference: png, light_source_strength: 0.5 });
+        expect(sentTo(endpoint)).toMatchObject({ light_source_strength: '0.5', light_reference: { type: 'image/png' } });
+      });
     });
   });
 });

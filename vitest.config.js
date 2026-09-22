@@ -37,6 +37,9 @@ export default defineConfig({
     // Timeout
     testTimeout: 10000,
 
+    // Fails any test that reaches a non-local host (see test/setup.js)
+    setupFiles: ['test/setup.js'],
+
     // Include/exclude patterns
     include: ['test/**/*.test.js'],
     exclude: ['node_modules/**', 'datasets/**', 'docs/**', 'dist/**'],
