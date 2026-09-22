@@ -44,7 +44,9 @@ const result = await api.generateUltra({
   aspect_ratio: '16:9'
 });
 
-console.log('Image saved to:', result.image_path);
+// result.image is a Buffer; save it however you like
+import { writeFile } from 'fs/promises';
+await writeFile('landscape.png', result.image);
 ```
 
 Full TypeScript support with exported types for all parameters and responses.
@@ -1025,6 +1027,16 @@ sai upscale creative \
   --creativity 0.35
 ```
 
+### Check Credits
+
+```bash
+sai credits
+```
+
+Prints the account balance from `GET /v1/user/balance` (programmatically: `api.getBalance()`).
+In the 1.0 live battery this endpoint briefly returned a stale figure, so use the account
+dashboard for billing reconciliation (docs/LIVE-BATTERY-2026-09-22.md, finding 3).
+
 ### Batch Processing
 
 Process multiple prompts in a single command:
@@ -1236,7 +1248,7 @@ datasets/
 ## Security Features
 
 ### API Key Protection
-- API keys are redacted in all logs (shows only last 4 characters: `xxx...abc1234`)
+- API keys are redacted in all logs (shows only the last 4 characters: `xxx...1234`)
 - Never logged in full, even in DEBUG mode
 - Prevents accidental exposure in log aggregation systems
 
@@ -1271,7 +1283,7 @@ datasets/
 - Saves API credits by catching errors early
 
 ### Image File Validation
-- Magic byte checking for PNG, JPEG, WebP formats
+- Magic byte checking for PNG, JPEG, WebP and GIF
 - File size validation
 - Format/extension validation
 - Prevents processing of malicious files
@@ -1351,13 +1363,13 @@ sai generate ultra --prompt "test" --log-level debug
 
 ### Response Types
 
-**Synchronous (Ultra, Core, SD3, Fast/Conservative Upscale):**
+**Synchronous (Ultra, Core, SD3, Fast/Conservative Upscale, all edit operations except Replace Background, all control operations):**
 - Returns HTTP 200 with image Buffer immediately
 - No polling required
 - CLI spinner shows during request
 
-**Asynchronous (Creative Upscale only):**
-- Returns HTTP 202 with task ID
+**Asynchronous (Creative Upscale, Replace Background and Relight):**
+- Returns a task ID (202 from creative upscale, 200 JSON from replace-background)
 - Automatically polls for result
 - CLI spinner shows time elapsed and estimated remaining time
 

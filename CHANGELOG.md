@@ -108,6 +108,14 @@ the reasoning behind each change is in `docs/DECISIONS.md`.
 - `validateImageUrl` no longer tells its own "resolves to internal" error from a DNS
   failure by matching the message text; only the lookup sits inside the try.
 - `writeToFile` / `readFromFile` name themselves in the "filepath is required" error.
+- `writeToFile` no longer casts `data as Buffer` when an image extension selects the
+  binary branch: a non-Buffer (e.g. an object bound for `x.png`) now throws a
+  `TypeError` naming the problem instead of failing inside `fs.writeFile`.
+- The missing-API-key message showed `stability --api-key … generate --ultra`; the
+  binary is `sai` and `ultra` is a subcommand.
+- README: the Quick Start printed `result.image_path`, which `ImageResult` does not
+  have; `sai credits` is now documented; "asynchronous (Creative Upscale only)"
+  omitted Replace Background and Relight.
 - **Ultra image-to-image timed out.** API calls had a 30 s timeout, and synchronous
   endpoints send nothing until the image is done; Ultra image-to-image took longer in
   the 1.0 live battery. The client gave up on a request the server may still have

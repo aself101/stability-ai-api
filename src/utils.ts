@@ -374,8 +374,14 @@ export async function writeToFile(data: unknown, filepath: string, fileFormat: F
     if (format === 'json') {
       await fs.writeFile(filepath, JSON.stringify(data, null, 2));
     } else if (format === 'binary') {
-      // For Buffer or binary data
-      await fs.writeFile(filepath, data as Buffer);
+      // Binary is chosen by extension as well as by type, so check the data
+      // itself rather than asserting `data as Buffer`: an object bound for a
+      // .png is a caller mistake, and fs.writeFile would reject it with a less
+      // useful message.
+      if (!(data instanceof Uint8Array)) {
+        throw new TypeError(`writeToFile: ${path.extname(filepath) || 'binary'} output needs a Buffer, got ${typeof data}`);
+      }
+      await fs.writeFile(filepath, data);
     } else {
       // Text format
       await fs.writeFile(filepath, String(data));
@@ -804,4 +810,9 @@ export function setLogLevel(level: string): void {
   logger.level = level.toLowerCase();
 }
 
+/**
+ * The shared winston logger (timestamped, level-prefixed, console transport).
+ * StabilityAPI, the CLI and these helpers all log through it; change its level
+ * with `setLogLevel` or the StabilityAPI `logLevel` option.
+ */
 export { logger };

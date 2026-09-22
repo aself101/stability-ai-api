@@ -838,6 +838,11 @@ describe('writeToFile / readFromFile keep image bytes intact', () => {
     expect((await fs.readFile(file)).equals(bytes)).toBe(true);
   });
 
+  it('refuses a non-Buffer bound for an image extension instead of casting it', async () => {
+    await expect(writeToFile({ hello: 'world' }, join(dir, 'x.png'))).rejects.toThrow("writeToFile: .png output needs a Buffer, got object");
+    await expect(writeToFile('text', join(dir, 'y.webp'))).rejects.toThrow(TypeError);
+  });
+
   it('readFromFile returns a .webp as a Buffer, not text', async () => {
     const file = join(dir, 'x.webp');
     await writeToFile(bytes, file);

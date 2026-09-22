@@ -389,7 +389,7 @@ export function getStabilityApiKey(cliApiKey: string | null = null): string {
     const errorMessage = [
       'STABILITY_API_KEY not found. Please provide your API key via one of these methods:',
       '',
-      '  1. CLI flag:           stability --api-key YOUR_KEY generate --ultra --prompt "..."',
+      '  1. CLI flag:           sai --api-key YOUR_KEY generate ultra --prompt "..."',
       '  2. Environment var:    export STABILITY_API_KEY=YOUR_KEY',
       '  3. Local .env file:    Create .env in current directory with STABILITY_API_KEY=YOUR_KEY',
       '  4. Global config:      Create ~/.stability/.env with STABILITY_API_KEY=YOUR_KEY',

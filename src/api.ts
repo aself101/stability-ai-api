@@ -576,7 +576,7 @@ export class StabilityAPI {
    *
    * @param imagePath - Path to input image or URL
    * @param params - Additional parameters
-   * @returns Task object or final result if wait=true
+   * @returns The final image by default (the task is polled to completion); the task handle `{ id }` when `wait: false`
    *
    * @example
    * const result = await api.upscaleCreative('/path/to/image.png', { creativity: 0.4 });
@@ -741,7 +741,7 @@ export class StabilityAPI {
    *
    * @param subjectImage - Path to image with subject to keep
    * @param options - Replace background options
-   * @returns Task object or final result if wait=true
+   * @returns The final image by default (the task is polled to completion); the task handle `{ id }` when `wait: false`
    *
    * @example
    * const result = await api.replaceBackgroundAndRelight('/path/to/portrait.png', {

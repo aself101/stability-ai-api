@@ -82,6 +82,13 @@ describe('buildEditParams', () => {
     });
   });
 
+  it('inpaint always sends the prompt, plus mask and grow_mask when given', () => {
+    expect(buildEditParams('inpaint', { image: 'x', outputFormat: 'png', prompt: 'a fern', mask: 'm.png', growMask: 10 })).toEqual({
+      output_format: 'png', prompt: 'a fern', mask: 'm.png', grow_mask: 10,
+    });
+    expect(buildEditParams('inpaint', { image: 'x', outputFormat: 'png', prompt: 'a fern' })).toEqual({ output_format: 'png', prompt: 'a fern' });
+  });
+
   it('search-and-replace maps --search to search_prompt', () => {
     expect(buildEditParams('search-and-replace', { image: 'x', outputFormat: 'png', prompt: 'dog', search: 'cat', growMask: 3 })).toEqual({
       output_format: 'png', prompt: 'dog', search_prompt: 'cat', grow_mask: 3,
