@@ -78,3 +78,20 @@ server abandoned it too; see finding 3.
 | run | endpoint / model | result | list price | output | notes |
 |---|---|---|---|---|---|
 | sd3-flash-webp | generate/sd3 `sd3.5-flash`, `-f webp` | OK | 2.5 | 1024×1024 | through the refactored CLI (`cli-helpers.ts`); the saved `.webp` decodes. Before the `writeToFile` fix every webp save was UTF-8-mangled |
+
+## Addendum 2 — async paths at `45941cf`
+
+The ship pipeline's anxiety-reader (run #2, F7) noted that the async paths had been
+rewritten after the battery (`_submitTask`, `waitForResult`'s shape and Retry-After
+handling) and not run live since. Both were re-run on the build of `45941cf`:
+
+| run | endpoint | path exercised | result | list price | wall s | output | notes |
+|---|---|---|---|---|---|---|---|
+| creative-submit | upscale/creative | SDK `new StabilityAPI()` (env key) → `upscaleCreative(…, { wait: false })` | OK | 60 | 4.5 | task handle `{ id }` | the library wrote nothing to stdout (quiet defaults, DECISIONS #19) |
+| creative-resume | results/{id} | CLI `sai result <id>` → `waitForResult` → `saveImageResult` | OK | 0 | 32 | 3152×3152 | polled to completion (31.4 s), decodes |
+| relight | edit/replace-background-and-relight | CLI `sai edit replace-bg … --light-strength 0.5` | OK | 8 | 14 | 1536×1536 | 200-JSON task id → polled 10.3 s; `finish_reason: SUCCESS`; metadata holds only the three typed parameters (no CLI defaults) |
+
+Both outputs checked visually. With these, every code path that changed after the
+original battery has run live at or after the commit that changed it: the synchronous
+response path (`36719d3`) by the SD 3.5 Flash webp run, and the async submit/poll/resume
+paths plus the new CLI number parsers (`45941cf`) here.

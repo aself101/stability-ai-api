@@ -9,7 +9,8 @@ semantic-release from commit subjects and are kept as they were.
 ## [1.0.0] - 2026-09-22
 
 Brings the wrapper to the bfl-api 2.0 / kling-api 2.0 baseline and the current Stability API.
-Every endpoint and SD 3.5 model was run live before release (`docs/LIVE-BATTERY-2026-09-22.md`);
+Every endpoint and SD 3.5 model was run live against production (`docs/LIVE-BATTERY-2026-09-22.md`);
+paths changed afterwards were re-run live at the commit that changed them (addenda 1 and 2);
 the reasoning behind each change is in `docs/DECISIONS.md`.
 
 ### Changed
