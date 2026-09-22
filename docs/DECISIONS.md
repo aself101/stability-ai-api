@@ -1,0 +1,248 @@
+# Decisions — stability-ai-api 1.0
+
+Why the 1.0 rewrite is shaped the way it is: what was decided, the reason, and what
+would break the reasoning. Where a decision copies bfl-api 2.0.1, it says so and cites
+bfl's `docs/DECISIONS.md` number, so a fix to one package can be carried to the other.
+
+## 1. Scope of the 1.0 endpoint set
+
+1.0 covers the 17 `v2beta/stable-image` submit endpoints (generate ×3, upscale ×3,
+edit ×7, control ×4) plus result polling and balance. It adds no endpoints: a diff
+against the live spec on 2026-09-22 found all 17 already wired. What 0.4.0 lacked
+was *fields* on them (SD 3.5 image-to-image, `cfg_scale`, `style_preset` on Ultra and
+SD 3.5, conservative `creativity`, creative `style_preset`) and one model (#5).
+
+**Deliberately out of scope** (Alex, 2026-09-22): Stable Fast 3D and SPAR3D
+(`/v2beta/3d/*`), Stable Audio 1 and 2 (`/v2beta/audio/*`), the v1 SDXL engine routes,
+and the superseded `/v2alpha/generation/*` routes. 3D and audio produce different
+media and belong in their own modules if they come at all. The drift check (#3) walks
+`ENDPOINT_FIELDS`, not the spec's path list, so these do not register as drift.
+
+**Breaks if:** a new `stable-image` endpoint ships. The drift check will not notice an
+added *path*, only changes to paths we already hold. Extending it to diff the spec's
+`/v2beta/stable-image/*` paths against the registry is the obvious next guard; it was
+left out of 1.0 to keep the check's failure modes the same as bfl's.
+
+## 2. Send only what the caller set; one registry of fields
+
+`ENDPOINT_FIELDS` (config.ts) lists, per path, the exact text and file parts each
+endpoint accepts. Every method builds its request through `StabilityAPI._submit`, which
+reads only those fields from the caller's values and skips `undefined`/`null`. Falsy
+values that were set (`0`, `false`, `''`) are sent.
+
+0.4.0 filled `aspect_ratio: '1:1'`, `output_format: 'png'`, `model: 'sd3.5-large'` and
+creative `creativity: 0.3` client-side. All four equal the server defaults (checked
+against the spec on 2026-09-22), so dropping them changes no output.
+
+**Why:** the same as bfl #2. The server's default is correct by definition and can
+change without a wrapper release, and a field the wrapper forces is a field that turns
+into a 400 when the API renames it. For Stability there was also a concrete failure: SD
+3.5 rejects `aspect_ratio` in image-to-image, so a forced `'1:1'` would have made
+image-to-image impossible.
+
+**Exception:** `upscaleFast(image, outputFormat = 'png')` keeps its positional default
+for signature compatibility. The value equals the server default.
+
+**Why keyed by path:** the three `sd3-*` endpoint keys pointed at one URL (#8), and the
+drift check needs one entry per URL.
+
+`test/payloads.test.js` sends every registered field through every public method and
+requires the multipart body to carry exactly that set. This closes the gap that let
+`style_preset` and `creativity` go unsent: before 1.0 no test inspected a request body.
+
+## 3. The spec is checked, not trusted
+
+`scripts/check-spec-drift.ts` follows bfl #6, adapted to multipart bodies. For each
+registered path it compares:
+- the field set, including text vs file;
+- every spec range and enum against the constraint tables;
+- constraints we hold for fields the spec no longer has;
+- prompt `maxLength`.
+
+`--control` seeds seven kinds of drift and requires each to be caught, and requires
+the unmodified spec to be clean. CI runs it before the tests.
+
+**Where the spec lives:** `https://api.stability.ai/v2alpha/openapi`. It serves the
+v2beta spec (`info.version: "v2beta"`) despite the path. It is linked from nowhere.
+It was found in the JS bundle of the docs site (`platform.stability.ai/docs/api-reference`
+is a client-rendered page), after `api.stability.ai/openapi.json` and
+`/v2beta/openapi.json` both returned 404.
+`docs/openapi-snapshot-2026-09-22.json` is the offline fallback
+(`npm run check:spec:snapshot`).
+
+**Deliberate divergences** go in `KNOWN_DIVERGENCES` with a reason and report as INFO.
+An entry that stops matching any difference is itself a FAIL, so the list cannot go
+stale. The control exercises exactly that case.
+
+**Breaks if:** Stability moves or removes that URL. CI then fails on the fetch, not
+on drift. Switch to the snapshot and go looking. The URL being undocumented is the
+most fragile assumption in this package.
+
+## 4. The server's validator is an oracle, and it is free
+
+Stability validates request parameters **before** authentication. A request with a
+bad parameter and an invalid key returns `400` with the validator's full error list.
+A request with valid parameters and an invalid key returns `401`. Failed requests are
+not billed, and an invalid key cannot be billed at all. So "does the server accept
+X?" can be answered with zero spend: send X with a dummy key and read whether the
+status is 400 or 401. The error text often names the accepted enum outright.
+
+All three "where the spec and server disagree" findings in #5 came from this, on
+2026-09-22.
+
+**Breaks if:** Stability moves auth ahead of validation, so every probe returns 401.
+When that happens, probes need a real key and a live call, which costs credits.
+
+## 5. Where the spec and the server disagreed
+
+| What | Spec says | Server does (probed 2026-09-22) | Wrapper follows |
+|---|---|---|---|
+| SD 3.5 `model` enum | 3 values; prose and pricing name `sd3.5-flash` | Validator lists `'sd3.5-large' \| 'sd3.5-large-turbo' \| 'sd3.5-medium' \| 'sd3.5-flash'`; a Flash request passes validation | Server: Flash is accepted (`KNOWN_DIVERGENCES`) |
+| erase `required` | lists `prompt`, but erase has no `prompt` property | no prompt → no prompt error | Server: no prompt |
+| upscale conservative / creative `prompt` | required | `400 prompt: required` | Spec and server agree. **0.4.0 typed it optional**, so the wrapper was the thing that was wrong |
+
+## 6. SD 3.5 `mode` is derived, not a parameter
+
+`generateSD3` sends `mode=image-to-image` when `image` is set and otherwise sends no
+`mode`, so the server's text-to-image default applies. There is no `mode` in
+`SD3Params`, and a `mode` passed from JavaScript is overwritten.
+
+**Why:** the API's `mode` is fully determined by whether an image is present. A
+separate parameter would add two states that can only be wrong (image-to-image with no
+image, text-to-image with one). The drift check records `mode` as derived rather than
+requiring a constraint for its enum.
+
+## 7. Image-to-image rules are enforced before the request
+
+`imageToImageErrors` applies to the generate endpoints that take an input image
+(Ultra, SD 3.5):
+- `image` requires `strength`, because the server requires it;
+- `strength` requires `image`, because a strength with nothing to apply it to is
+  a mistake;
+- on SD 3.5 only, `aspect_ratio` with `image` is an error, because the API accepts
+  it only for text-to-image.
+
+`validateModelParams` (used by the CLI) and the API methods both call it, so
+programmatic callers get the same message without a round trip.
+
+This also fixes an 0.4.0 bug in both directions. The API sent Ultra's `strength` with
+no image. The CLI silently dropped `--strength` when `--image` was missing.
+
+## 8. One `sd3` endpoint key
+
+`MODEL_ENDPOINTS['sd3-large' | 'sd3-medium' | 'sd3-large-turbo']` are replaced by
+`MODEL_ENDPOINTS['sd3']`. All three were the same URL; the SD 3.5 variant is the `model`
+field. The old names also read as the SD3.0 model IDs Stability retired in April 2025,
+and the morning audit that started this work had to stop and establish they were not.
+This is a breaking change to an exported constant, which is acceptable at 1.0.
+
+## 9. Native fetch; API requests follow no redirects
+
+The HTTP layer is `src/http.ts`, ported near-verbatim from bfl-api, so bfl #11 applies
+in full. fetch provides none of the four things axios did implicitly, so each was
+rebuilt: throw on non-2xx, a streaming size cap, manual redirects with per-hop
+validation, and typed errors. The one addition is a `form` option for multipart
+bodies. Every Stability generation endpoint takes multipart; BFL's are JSON.
+
+**Stability-specific:** requests to the API itself use `maxRedirects: 0`. The API does
+not redirect, and refusing to follow keeps the `Authorization` header from being sent
+anywhere but `api.stability.ai`. Image downloads do follow redirects, re-validating
+each hop (#10).
+
+`axios` and `form-data` are gone. Runtime dependencies are `commander`, `dotenv` and
+`winston`. Node 22 is required, the same as bfl.
+
+## 10. SSRF: every hop, every address, every range
+
+`validateImageUrl` is shared with bfl-api and had the same three gaps there:
+
+1. **Redirects were followed blind.** A URL that passed validation could 302 to a
+   private address or downgrade to http. Every download hop now passes
+   `validateImageUrl` (bfl #12).
+2. **Only the first DNS answer was checked** (`lookup(host)`). A name with one public
+   and one private record passed. Now `lookup(host, { all: true })` checks every
+   address, and IPv4-mapped IPv6 answers (`::ffff:10.0.0.1`) are judged by their IPv4.
+3. **IPv6 ranges were matched as literals.** `/^fc00:/` and `/^fd00:/` let the rest
+   of `fc00::/7` through (`fd12:3456::1`), and `/^fe80:/` missed the rest of
+   `fe80::/10`. They are now `/^f[cd][0-9a-f]{2}:/` and `/^fe[89ab][0-9a-f]:/`. Both
+   require four hex digits, because `fd1::` is `0x0fd1` and is not unique-local.
+
+Also, `urlToBase64` now validates its own argument. Called directly, it performed no
+check at all.
+
+Items 2 and 3 **are not yet fixed in bfl-api**. Its `isBlockedIP` and `validateImageUrl`
+are the same code; carry this over.
+
+**Still open**, as in bfl: DNS rebinding. Validation resolves, then fetch resolves
+again independently, which leaves a time-of-check/time-of-use window. Closing it needs
+a pinned-IP dispatcher, which means an explicit `undici` dependency. This is recorded
+as a known limitation.
+
+## 11. Retry on type, only while polling
+
+`isTransientError` classifies on type and fields, never message text, following
+bfl #13. Transient means:
+- HTTP 429, 502, 503 or 504;
+- a `StabilityNetworkError` whose undici code is retryable;
+- a `StabilityTimeoutError`.
+
+0.4.0's matcher never fired. `'rate limit'` was compared against the message
+`'Rate limit exceeded…'` (capital R), and `'502'`/`'503'` against axios's development
+message, which production sanitising replaced. `MAX_RETRIES` was declared and never
+read.
+
+Retries happen only inside `waitForResult`: `maxRetries` consecutive failures
+(default 3), a budget that resets after any successful poll, and a wait of
+`max(pollInterval, Retry-After)`.
+
+**Submissions are never retried.** A generate/edit/control/upscale call is a paid
+operation, and a timeout or a 502 does not prove the server did no work, so an
+automatic retry risks billing twice. Callers who want that trade can make it
+themselves.
+
+The README had described exponential backoff, a `maxRetries` option and no retry on
+429 since 0.2. None of that matched the code. The section now describes 1.0, and
+`maxRetries` exists.
+
+## 12. Typed errors, sanitised messages
+
+A non-2xx response throws `StabilityHttpError` with `status`, `retryAfter` and the
+parsed `body`. The messages for 400/401/403/413/429 are unchanged from 0.4.0, so
+existing `error.message.includes(...)` checks keep working. With
+`NODE_ENV=production`, unmapped statuses keep the generic message, and the detail
+moves to `.body` rather than being lost.
+
+## 13. The unit suite never touches the network
+
+`test/setup.js` replaces `fetch` with a guard that rejects any non-local host. It
+records each violation and fails the test in `afterEach`, so a test's own try/catch
+cannot swallow it.
+
+**Why:** found during 1.0, six tests were sending real requests to `api.stability.ai`.
+They relied on a nonexistent input file to fail. A sibling suite's `buildFormData` spy
+leaked into them, so no file was read, and their
+`catch (e) { expect(e.message).not.toContain(...) }` shape passed on whatever the live
+server said. This was harmless in effect, since the keys were fake and the server
+validates first (#4), but it was invisible until the fetch migration made the
+responses show up in the logs. The guard caught exactly those six. `test/http.test.ts`
+uses a local server, which the guard allows.
+
+## 14. Releases are manual; the version is 1.0.0
+
+This follows bfl #10. semantic-release is removed, CI verifies and does not publish,
+`version` is bumped by hand, `CHANGELOG.md` is hand-written, and `npm publish` runs from
+a checkout that passed `npm run verify`. semantic-release was removed in the **first**
+commit on `release/1.0`. Before that, any push to `master` would have auto-published a
+stray 0.x.
+
+`1.0.0` was checked against npm's tombstones before being chosen (bfl #14). The
+packument `time` map and `versions` map had no set difference on 2026-09-22.
+
+## 15. Line endings are LF
+
+Seven files were CRLF in an otherwise-LF repo with no `.gitattributes`. The first
+rewrite of `api.ts` produced a whole-file diff. The fix is a `.gitattributes`
+(`* text=auto eol=lf`) and a separate renormalisation commit, the same as bfl
+`e0c80c7`. Note that `git add --renormalize` updates the index but **not the working
+tree**. The unchanged files stayed CRLF on disk, and `dist/` kept CRLF, until they
+were checked out again.

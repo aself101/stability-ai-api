@@ -4,7 +4,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node.js Version](https://img.shields.io/node/v/stability-ai-api)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue.svg)](https://www.typescriptlang.org/)
-[![Tests](https://img.shields.io/badge/tests-283%20passing-brightgreen)](test/)
+[![Tests](https://img.shields.io/badge/tests-401%20passing-brightgreen)](test/)
+[![Coverage](https://img.shields.io/badge/coverage-90.6%25-brightgreen)](test/)
 [![Coverage](https://img.shields.io/badge/coverage-76%25-green)](test/)
 
 A TypeScript/Node.js wrapper for the [Stability AI API](https://platform.stability.ai/docs/api-reference) that provides easy access to Stable Diffusion 3.5, image upscaling, editing, and control models. Generate stunning AI images, upscale, edit, and control them with professional quality through a simple command-line interface.
@@ -82,7 +83,7 @@ The Stability AI API provides access to state-of-the-art image generation and up
 - **Organized Storage** - Structured directories with timestamped files and metadata
 - **CLI Orchestration** - Command-line tool with subcommands for generation and upscaling
 - **Full TypeScript Support** - Complete type definitions for all API methods, parameters, and responses
-- **Comprehensive Testing** - 283 tests with 76% coverage (api.ts: 64.56%, config.ts: 92.22%, utils.ts: 73.38%)
+- **Comprehensive Testing** - 401 tests, 90.6% line coverage (api.ts 95.0%, config.ts 92.9%, http.ts 91.2%, utils.ts 85.3%; measured 2026-09-22), no network access; a spec-drift check against the live API runs in CI
 
 ### Endpoint Summary
 
@@ -431,6 +432,9 @@ sai generate ultra --prompt "test"
 
 ## Installation
 
+Requires **Node.js 22 or later** (native `fetch`, `FormData` and `Blob`; since 1.0 there
+is no HTTP-client dependency).
+
 ### Global Installation (Recommended)
 ```bash
 # Install globally from npm
@@ -448,8 +452,11 @@ cd stability-ai-api
 # Install dependencies
 npm install
 
-# Run tests
-npm test  # Run 283 tests
+# Run the unit tests
+npm test
+
+# Everything CI runs: build, spec-drift control, drift check against the live API spec, tests
+npm run verify
 ```
 
 ## TypeScript Support
@@ -1251,8 +1258,13 @@ datasets/
 The service includes comprehensive testing:
 
 ```bash
-# Run all tests (283 tests)
+# Run all tests (no network: test/setup.js fails any test that leaves localhost)
 npm test
+
+# Check the wrapper against Stability's live OpenAPI spec
+npm run check:spec            # live
+npm run check:spec:snapshot   # offline, against docs/openapi-snapshot-2026-09-22.json
+npm run check:spec:control    # prove the check can fail
 
 # Watch mode for development
 npm run test:watch
@@ -1356,7 +1368,7 @@ MIT
 
 Contributions welcome! Please ensure all tests pass before submitting PRs:
 ```bash
-npm test  # All 283 tests must pass
+npm run verify  # build, spec-drift control + check, and all tests must pass
 ```
 
 ---
