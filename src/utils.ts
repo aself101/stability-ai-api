@@ -9,10 +9,9 @@ import fs from 'fs/promises';
 import { statSync } from 'fs';
 import path from 'path';
 import winston from 'winston';
-import axios from 'axios';
 import { lookup } from 'dns/promises';
 import { isIPv4, isIPv6 } from 'net';
-import FormData from 'form-data';
+import { requestBytes } from './http.js';
 import type {
   SpinnerObject,
   ImageValidationConstraints,
@@ -27,7 +26,11 @@ import type {
 /** Maximum file size for image downloads (50MB) */
 export const MAX_DOWNLOAD_SIZE = 50 * 1024 * 1024;
 
-/** Timeout for downloading images from URLs (60 seconds) */
+/**
+ * Idle timeout for downloading images from URLs (60 seconds). Under axios this
+ * was a total-request timeout; since 1.0 it resets on every chunk received
+ * (see src/http.ts), so a slow but progressing download is not killed.
+ */
 export const DOWNLOAD_TIMEOUT_MS = 60000;
 
 /** Maximum number of redirects allowed when fetching URLs */
@@ -55,7 +58,14 @@ const logger = winston.createLogger({
  * @returns True if IP is blocked
  */
 function isBlockedIP(ip: string): boolean {
-  const cleanIP = ip.replace(/^\[|\]$/g, ''); // Remove IPv6 brackets
+  const cleanIP = ip.replace(/^\[|\]$/g, '').toLowerCase(); // Remove IPv6 brackets
+
+  // IPv4-mapped IPv6 (::ffff:10.0.0.1) — judge the embedded IPv4. DNS can
+  // return this form, and it bypasses every IPv4 pattern below otherwise.
+  const mapped = cleanIP.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mapped) {
+    return isBlockedIP(mapped[1]);
+  }
 
   // Block localhost variations
   if (cleanIP === 'localhost' || cleanIP === '127.0.0.1' || cleanIP === '::1') {
@@ -80,10 +90,13 @@ function isBlockedIP(ip: string): boolean {
     /^192\.168\./,               // Private Class C
     /^169\.254\./,               // Link-local (AWS metadata)
     /^0\./,                      // Invalid range
-    /^::1$/,                     // IPv6 loopback
-    /^fe80:/,                    // IPv6 link-local
-    /^fc00:/,                    // IPv6 unique local
-    /^fd00:/,                    // IPv6 unique local
+    /^::1?$/,                    // IPv6 loopback / unspecified
+    // fe80::/10 and fc00::/7 are prefix *ranges*, not literals. Until 1.0 these
+    // were /^fe80:/, /^fc00:/, /^fd00:/, which passed fd12:3456::1 and every
+    // other ULA address. A first hextet with fewer than four digits has
+    // implied leading zeros (fd1:: is 0x0fd1), so exactly four are required.
+    /^fe[89ab][0-9a-f]:/,        // IPv6 link-local (fe80::/10)
+    /^f[cd][0-9a-f]{2}:/,        // IPv6 unique local (fc00::/7)
   ];
 
   return blockedPatterns.some(pattern => pattern.test(cleanIP));
@@ -161,16 +174,19 @@ export async function validateImageUrl(url: string): Promise<string> {
     // Hostname is a domain name - perform DNS resolution to prevent DNS rebinding
     try {
       logger.debug(`Resolving DNS for hostname: ${hostname}`);
-      const { address } = await lookup(hostname);
-      logger.debug(`DNS resolved ${hostname} → ${address}`);
+      // Every address, not the first: a name with one public and one private
+      // record passed a first-address check, and the client may connect to
+      // either.
+      const addresses = await lookup(hostname, { all: true });
+      logger.debug(`DNS resolved ${hostname} → ${addresses.map(a => a.address).join(', ')}`);
 
-      // Validate the resolved IP address
-      if (isBlockedIP(address)) {
-        logger.warn(`SECURITY: DNS resolution of ${hostname} points to blocked IP: ${address}`);
+      const blocked = addresses.find(a => isBlockedIP(a.address));
+      if (blocked) {
+        logger.warn(`SECURITY: DNS resolution of ${hostname} points to blocked IP: ${blocked.address}`);
         throw new Error(`Domain ${hostname} resolves to internal/private IP address`);
       }
 
-      logger.debug(`DNS validation passed for ${hostname} (resolved to ${address})`);
+      logger.debug(`DNS validation passed for ${hostname}`);
     } catch (error) {
       const err = error as NodeJS.ErrnoException;
       if (err.code === 'ENOTFOUND') {
@@ -416,6 +432,25 @@ export async function fileToBase64(filepath: string): Promise<string> {
 }
 
 /**
+ * Fetch image bytes from a URL: validated, redirect hops re-validated,
+ * size-capped while streaming. The single download path for every URL helper
+ * below — under axios, `urlToBase64` skipped validation entirely when called
+ * directly and none of the three re-checked redirect targets.
+ *
+ * @param url - Image URL (HTTPS only)
+ * @returns Image bytes
+ */
+async function fetchImageBytes(url: string): Promise<Buffer> {
+  await validateImageUrl(url);
+  return await requestBytes(url, {
+    timeoutMs: DOWNLOAD_TIMEOUT_MS,
+    maxRedirects: MAX_REDIRECTS,
+    maxBytes: MAX_DOWNLOAD_SIZE,
+    validateHop: validateImageUrl,
+  });
+}
+
+/**
  * Download image from URL to base64 string.
  *
  * @param url - Image URL
@@ -425,21 +460,9 @@ export async function fileToBase64(filepath: string): Promise<string> {
  */
 export async function urlToBase64(url: string): Promise<string> {
   try {
-    const response = await axios.get<ArrayBuffer>(url, {
-      responseType: 'arraybuffer',
-      timeout: DOWNLOAD_TIMEOUT_MS,
-      maxRedirects: MAX_REDIRECTS,
-      maxContentLength: MAX_DOWNLOAD_SIZE,
-      maxBodyLength: MAX_DOWNLOAD_SIZE
-    });
-
-    // Verify actual size (belt-and-suspenders approach)
-    if (response.data.byteLength > MAX_DOWNLOAD_SIZE) {
-      throw new Error(`Image exceeds maximum size of ${MAX_DOWNLOAD_SIZE / (1024 * 1024)}MB`);
-    }
-
-    const base64 = Buffer.from(response.data).toString('base64');
-    logger.debug(`Downloaded and converted ${url} to base64 (${base64.length} chars, ${response.data.byteLength} bytes)`);
+    const bytes = await fetchImageBytes(url);
+    const base64 = bytes.toString('base64');
+    logger.debug(`Downloaded and converted ${url} to base64 (${base64.length} chars, ${bytes.length} bytes)`);
     return base64;
   } catch (error) {
     const err = error as Error;
@@ -459,8 +482,7 @@ export async function urlToBase64(url: string): Promise<string> {
 export async function imageToBase64(input: string): Promise<string> {
   // Check if input is a URL
   if (input.startsWith('http://') || input.startsWith('https://')) {
-    // Validate URL for security (SSRF protection)
-    await validateImageUrl(input);
+    // urlToBase64 validates (SSRF protection)
     return await urlToBase64(input);
   } else {
     // Validate file path (existence and format)
@@ -477,27 +499,13 @@ export async function imageToBase64(input: string): Promise<string> {
  */
 export async function downloadImage(url: string, filepath: string): Promise<void> {
   try {
-    // Validate URL for security (SSRF protection)
-    await validateImageUrl(url);
+    const bytes = await fetchImageBytes(url);
 
     const dir = path.dirname(filepath);
     await ensureDirectory(dir);
 
-    const response = await axios.get<ArrayBuffer>(url, {
-      responseType: 'arraybuffer',
-      timeout: DOWNLOAD_TIMEOUT_MS,
-      maxRedirects: MAX_REDIRECTS,
-      maxContentLength: MAX_DOWNLOAD_SIZE,
-      maxBodyLength: MAX_DOWNLOAD_SIZE
-    });
-
-    // Verify actual size
-    if (response.data.byteLength > MAX_DOWNLOAD_SIZE) {
-      throw new Error(`Image exceeds maximum size of ${MAX_DOWNLOAD_SIZE / (1024 * 1024)}MB`);
-    }
-
-    await fs.writeFile(filepath, Buffer.from(response.data));
-    logger.info(`Downloaded image to ${filepath} (${response.data.byteLength} bytes)`);
+    await fs.writeFile(filepath, bytes);
+    logger.info(`Downloaded image to ${filepath} (${bytes.length} bytes)`);
   } catch (error) {
     const err = error as Error;
     logger.error(`Error downloading image: ${err.message}`);
@@ -675,19 +683,8 @@ export async function fileToBuffer(filePath: string): Promise<Buffer> {
  */
 export async function urlToBuffer(url: string): Promise<Buffer> {
   try {
-    // Validate URL for security
-    await validateImageUrl(url);
-
     logger.debug(`Downloading image from URL: ${url}`);
-
-    const response = await axios.get<ArrayBuffer>(url, {
-      responseType: 'arraybuffer',
-      timeout: DOWNLOAD_TIMEOUT_MS,
-      maxContentLength: MAX_DOWNLOAD_SIZE,
-      maxRedirects: MAX_REDIRECTS
-    });
-
-    const buffer = Buffer.from(response.data);
+    const buffer = await fetchImageBytes(url);
     logger.debug(`Downloaded ${buffer.length} bytes from ${url}`);
     return buffer;
   } catch (error) {
@@ -698,12 +695,26 @@ export async function urlToBuffer(url: string): Promise<Buffer> {
 }
 
 /**
+ * Sniff an image MIME type from magic bytes, for the multipart part's
+ * content-type. A native Blob without a type goes out as
+ * application/octet-stream; the `form-data` package used to infer one from the
+ * filename. Returns '' when unrecognised (the server then sniffs the bytes).
+ */
+export function detectImageMime(buffer: Buffer): string {
+  if (buffer.length >= 4 && buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) return 'image/png';
+  if (buffer.length >= 3 && buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) return 'image/jpeg';
+  if (buffer.length >= 12 && buffer.subarray(0, 4).toString('latin1') === 'RIFF' && buffer.subarray(8, 12).toString('latin1') === 'WEBP') return 'image/webp';
+  if (buffer.length >= 3 && buffer.subarray(0, 3).toString('latin1') === 'GIF') return 'image/gif';
+  return '';
+}
+
+/**
  * Build FormData object for multipart/form-data requests.
  * Helper for Stability AI API which uses multipart instead of JSON.
  *
  * @param params - Parameters to include in form data
  * @param imageParams - Image parameters { fieldName: imagePath/Buffer }
- * @returns FormData object ready for upload
+ * @returns Native FormData, ready to pass to `request({ form })`
  *
  * @example
  * const formData = await buildFormData(
@@ -743,8 +754,9 @@ export async function buildFormData(
         }
       }
 
-      // Append buffer with filename
-      formData.append(fieldName, buffer, { filename });
+      // Append as a typed Blob with filename. Copy into a fresh Uint8Array so the
+      // Blob never aliases a pooled Buffer's backing ArrayBuffer.
+      formData.append(fieldName, new Blob([new Uint8Array(buffer)], { type: detectImageMime(buffer) }), filename);
       logger.debug(`Added image to form data: ${fieldName} (${buffer.length} bytes)`);
     }
   }

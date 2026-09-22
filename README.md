@@ -702,7 +702,7 @@ const status = await api.getResult(taskId);
 const result = await api.waitForResult(taskId, {
   timeout: 300,      // Max 5 minutes
   pollInterval: 2,   // Check every 2 seconds
-  maxRetries: 3,     // Retry on transient errors
+  maxRetries: 3,     // Consecutive transient failures tolerated
   showSpinner: true  // Show animated progress spinner
 });
 ```
@@ -827,58 +827,67 @@ await writeToFile(noBg.image, './subject_only.png');
 
 ### Error Handling
 
+Failed API responses throw a `StabilityHttpError` carrying the HTTP `status`,
+any `Retry-After` value (seconds) and the parsed response `body`. Branch on
+`status`, not on message text:
+
 ```javascript
-import { StabilityAPI } from 'stability-ai-api';
+import { StabilityAPI, StabilityHttpError, StabilityNetworkError, StabilityTimeoutError } from 'stability-ai-api';
 
 const api = new StabilityAPI();
 
 try {
-  const result = await api.generateUltra({
-    prompt: 'test image',
-    aspect_ratio: '16:9'
-  });
-
+  const result = await api.generateUltra({ prompt: 'test image', aspect_ratio: '16:9' });
   console.log('Success!');
 } catch (error) {
-  if (error.message.includes('API key')) {
-    console.error('Authentication failed - check your API key');
-  } else if (error.message.includes('credits')) {
-    console.error('Insufficient credits');
-  } else if (error.message.includes('moderation')) {
-    console.error('Content rejected by moderation filters');
+  if (error instanceof StabilityHttpError) {
+    switch (error.status) {
+      case 400: console.error(error.message); break;          // "Invalid parameters: <server errors>"
+      case 401: console.error('Check your API key'); break;
+      case 402: console.error('Insufficient credits'); break;
+      case 403: console.error('Rejected by content moderation'); break;
+      case 429: console.error(`Rate limited; retry after ${error.retryAfter ?? '?'}s`); break;
+      default:  console.error('API error', error.status, error.body);
+    }
+  } else if (error instanceof StabilityNetworkError) {
+    console.error('No response from the API:', error.code, error.retryable ? '(retryable)' : '');
+  } else if (error instanceof StabilityTimeoutError) {
+    console.error(`No data for ${error.timeoutMs}ms`);
   } else {
-    console.error('Generation failed:', error.message);
+    throw error;
   }
 }
 ```
 
+With `NODE_ENV=production`, statuses without a mapped message (5xx, 402, …) get
+a generic message so upstream detail is not echoed to end users; the detail
+stays available on `error.body`.
+
 ### Retry Behavior
 
-The API includes automatic retry logic for transient errors:
+Generation, edit, control and upscale requests are **not** retried — each is a
+single paid submission, and retrying one could bill twice. Retries apply only
+while `waitForResult` polls an async task (creative upscale,
+replace-background-and-relight):
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| Max Retries | 3 | Number of retry attempts before failing |
-| Backoff | Exponential | 1s → 2s → 4s between retries |
-| Retry On | `502`, `503`, `504`, network errors | Transient/temporary failures |
-| No Retry | `400`, `401`, `402`, `422`, `429` | Permanent errors (bad request, auth, rate limit) |
+| | |
+|---|---|
+| Retried | `429`, `502`, `503`, `504`, retryable network errors (`ECONNRESET`, `UND_ERR_SOCKET`, …), idle timeouts |
+| Not retried | every other status, including `400`, `401`, `402`, `403`, `500` |
+| Budget | `maxRetries` **consecutive** transient failures (default 3); resets after any successful poll; `0` disables |
+| Wait | `pollInterval`, or `Retry-After` if the server asks for longer — no exponential backoff |
 
 ```javascript
-// Configure retry behavior for async operations
 const result = await api.waitForResult(taskId, {
-  maxRetries: 5,       // Override default retry count
-  pollInterval: 3,     // Seconds between polls
-  timeout: 600         // Max wait time in seconds
+  maxRetries: 5,       // tolerate up to 5 transient failures in a row
+  pollInterval: 3,     // seconds between polls
+  timeout: 600         // overall limit, seconds
 });
-
-// Disable retries by catching and not retrying
-try {
-  const result = await api.generateUltra({ prompt: 'test' });
-} catch (error) {
-  // Handle without retry
-  console.error('Failed:', error.message);
-}
 ```
+
+*Until 1.0 this section described exponential backoff, a `maxRetries` option,
+and no retry on `429`; none of it matched the code, whose retry check never
+fired. The table above is what 1.0 does.*
 
 ## CLI Usage
 
@@ -1278,7 +1287,7 @@ The Stability AI API has unique response characteristics:
 
 - **Synchronous responses**: Return HTTP 200 with raw image Buffer immediately
 - **Asynchronous responses**: Return HTTP 202 with task ID, requires polling
-- **Multipart/form-data**: All requests use form-data (not JSON)
+- **Multipart/form-data**: All generation requests are multipart (native `FormData`, not JSON)
 - **Buffer handling**: Images returned as binary Buffers, not base64
 
 ## Related Packages

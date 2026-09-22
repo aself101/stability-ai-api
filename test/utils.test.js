@@ -3,9 +3,9 @@
  * Tests for file I/O, image conversion, and filename generation utilities
  */
 
-import { describe, it, expect, beforeAll, afterAll, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi, beforeEach, afterEach } from 'vitest';
 import { writeFileSync, unlinkSync, mkdirSync, rmdirSync, existsSync } from 'fs';
-import { join } from 'path';
+import path, { join } from 'path';
 import fs from 'fs/promises';
 
 // Mock DNS module before importing utils
@@ -28,8 +28,14 @@ import {
   pause,
   randomNumber,
   setLogLevel,
-  fileToBase64
+  fileToBase64,
+  urlToBase64,
+  urlToBuffer,
+  downloadImage,
+  detectImageMime,
+  MAX_DOWNLOAD_SIZE
 } from '../src/utils.js';
+import { stubFetch, imageResponse, PNG_BYTES } from './helpers/fetch-mock.js';
 import { validateApiKeyFormat } from '../src/config.js';
 import { lookup } from 'dns/promises';
 
@@ -143,10 +149,10 @@ describe('Image Validation (Security)', () => {
 
     it('should accept valid HTTPS URLs with public IPs', async () => {
       // Mock DNS to return a public IP
-      lookup.mockResolvedValue({ address: '8.8.8.8', family: 4 });
+      lookup.mockResolvedValue([{ address: '8.8.8.8', family: 4 }]);
       await expect(validateImageUrl('https://example.com/image.jpg')).resolves.toBe('https://example.com/image.jpg');
 
-      lookup.mockResolvedValue({ address: '8.8.8.8', family: 4 });
+      lookup.mockResolvedValue([{ address: '8.8.8.8', family: 4 }]);
       await expect(validateImageUrl('https://cdn.example.com/path/to/image.png')).resolves.toBe('https://cdn.example.com/path/to/image.png');
     });
 
@@ -198,42 +204,79 @@ describe('Image Validation (Security)', () => {
 
     // DNS Rebinding Prevention Tests
     it('should reject domains resolving to localhost (DNS rebinding prevention)', async () => {
-      lookup.mockResolvedValue({ address: '127.0.0.1', family: 4 });
+      lookup.mockResolvedValue([{ address: '127.0.0.1', family: 4 }]);
       await expect(validateImageUrl('https://evil.com/image.jpg')).rejects.toThrow('resolves to internal/private IP');
     });
 
     it('should reject domains resolving to private IPs (DNS rebinding prevention)', async () => {
       // Test 10.x.x.x
-      lookup.mockResolvedValue({ address: '10.0.0.1', family: 4 });
+      lookup.mockResolvedValue([{ address: '10.0.0.1', family: 4 }]);
       await expect(validateImageUrl('https://evil.com/image.jpg')).rejects.toThrow('resolves to internal/private IP');
 
       // Test 192.168.x.x
-      lookup.mockResolvedValue({ address: '192.168.1.1', family: 4 });
+      lookup.mockResolvedValue([{ address: '192.168.1.1', family: 4 }]);
       await expect(validateImageUrl('https://evil2.com/image.jpg')).rejects.toThrow('resolves to internal/private IP');
 
       // Test 172.16-31.x.x
-      lookup.mockResolvedValue({ address: '172.16.0.1', family: 4 });
+      lookup.mockResolvedValue([{ address: '172.16.0.1', family: 4 }]);
       await expect(validateImageUrl('https://evil3.com/image.jpg')).rejects.toThrow('resolves to internal/private IP');
     });
 
     it('should reject domains resolving to cloud metadata IPs (DNS rebinding prevention)', async () => {
-      lookup.mockResolvedValue({ address: '169.254.169.254', family: 4 });
+      lookup.mockResolvedValue([{ address: '169.254.169.254', family: 4 }]);
       await expect(validateImageUrl('https://evil.com/image.jpg')).rejects.toThrow('resolves to internal/private IP');
     });
 
     it('should reject domains resolving to IPv6 loopback (DNS rebinding prevention)', async () => {
-      lookup.mockResolvedValue({ address: '::1', family: 6 });
+      lookup.mockResolvedValue([{ address: '::1', family: 6 }]);
       await expect(validateImageUrl('https://evil.com/image.jpg')).rejects.toThrow('resolves to internal/private IP');
     });
 
     it('should reject domains resolving to IPv6 private addresses (DNS rebinding prevention)', async () => {
       // Test fe80: (link-local)
-      lookup.mockResolvedValue({ address: 'fe80::1', family: 6 });
+      lookup.mockResolvedValue([{ address: 'fe80::1', family: 6 }]);
       await expect(validateImageUrl('https://evil.com/image.jpg')).rejects.toThrow('resolves to internal/private IP');
 
       // Test fc00: (unique local)
-      lookup.mockResolvedValue({ address: 'fc00::1', family: 6 });
+      lookup.mockResolvedValue([{ address: 'fc00::1', family: 6 }]);
       await expect(validateImageUrl('https://evil2.com/image.jpg')).rejects.toThrow('resolves to internal/private IP');
+    });
+
+    // Hardened in 1.0. Each case below passed the 0.4.0 validator.
+    it('should check every resolved address, not just the first', async () => {
+      lookup.mockResolvedValue([
+        { address: '93.184.216.34', family: 4 },
+        { address: '10.0.0.1', family: 4 },
+      ]);
+      await expect(validateImageUrl('https://mixed.example/image.jpg')).rejects.toThrow('resolves to internal/private IP');
+      expect(lookup).toHaveBeenLastCalledWith('mixed.example', { all: true });
+    });
+
+    it('should reject the whole fc00::/7 unique-local range, not just the fc00:/fd00: literals', async () => {
+      for (const address of ['fd12:3456:789a::1', 'fcff::1', 'FD00::1']) {
+        lookup.mockResolvedValue([{ address, family: 6 }]);
+        await expect(validateImageUrl('https://evil.com/image.jpg'), address).rejects.toThrow('resolves to internal/private IP');
+      }
+    });
+
+    it('should reject the whole fe80::/10 link-local range', async () => {
+      for (const address of ['fe90::1', 'febf::1']) {
+        lookup.mockResolvedValue([{ address, family: 6 }]);
+        await expect(validateImageUrl('https://evil.com/image.jpg'), address).rejects.toThrow('resolves to internal/private IP');
+      }
+    });
+
+    it('should judge an IPv4-mapped IPv6 answer by its embedded IPv4', async () => {
+      lookup.mockResolvedValue([{ address: '::ffff:10.0.0.1', family: 6 }]);
+      await expect(validateImageUrl('https://evil.com/image.jpg')).rejects.toThrow('resolves to internal/private IP');
+    });
+
+    it('should not over-block: short hextets and public IPv6 pass', async () => {
+      // fd1:: is 0x0fd1 (implied leading zero) — not ULA. 2606:... is public.
+      for (const address of ['fd1::1', 'fe8::1', '2606:4700::6810:84e5', '::ffff:93.184.216.34']) {
+        lookup.mockResolvedValue([{ address, family: 6 }]);
+        await expect(validateImageUrl('https://ok.example/image.jpg'), address).resolves.toBe('https://ok.example/image.jpg');
+      }
     });
 
     it('should handle DNS lookup failures gracefully', async () => {
@@ -387,44 +430,49 @@ describe('Image Buffer Functions', () => {
   });
 
   describe('buildFormData', () => {
-    it('should build form data with text parameters', async () => {
-      const formData = await buildFormData({
-        prompt: 'test prompt',
-        seed: 42,
-        output_format: 'png'
-      });
+    // Until 1.0 these asserted only toBeDefined(); they would have passed on
+    // an empty object. They now pin the exact multipart entries sent.
+    const entries = (fd) => [...fd.entries()].map(([k, v]) =>
+      [k, typeof v === 'string' ? v : { name: v.name, type: v.type, size: v.size }]);
 
-      expect(formData).toBeDefined();
-      expect(typeof formData.append).toBe('function');
+    it('returns a native FormData with stringified text fields in order', async () => {
+      const formData = await buildFormData({ prompt: 'test prompt', seed: 42, output_format: 'png' });
+
+      expect(formData).toBeInstanceOf(FormData);
+      expect(entries(formData)).toEqual([
+        ['prompt', 'test prompt'],
+        ['seed', '42'],
+        ['output_format', 'png'],
+      ]);
     });
 
-    it('should build form data with image parameters', async () => {
-      const formData = await buildFormData(
-        { prompt: 'test' },
-        { image: testImage }
-      );
+    it('skips undefined and null but sends falsy values that were set', async () => {
+      const formData = await buildFormData({ prompt: 'p', seed: undefined, style_preset: null, strength: 0, flag: false });
 
-      expect(formData).toBeDefined();
+      expect(entries(formData)).toEqual([['prompt', 'p'], ['strength', '0'], ['flag', 'false']]);
     });
 
-    it('should handle buffer input', async () => {
-      const buffer = Buffer.from([0x89, 0x50, 0x4E, 0x47]);
-      const formData = await buildFormData(
-        { prompt: 'test' },
-        { image: buffer }
-      );
+    it('sends a file path as a typed Blob named after the file', async () => {
+      const formData = await buildFormData({ prompt: 'test' }, { image: testImage });
+      const size = (await fs.stat(testImage)).size;
 
-      expect(formData).toBeDefined();
+      expect(entries(formData)).toEqual([
+        ['prompt', 'test'],
+        ['image', { name: path.basename(testImage), type: 'image/png', size }],
+      ]);
     });
 
-    it('should skip undefined values', async () => {
-      const formData = await buildFormData({
-        prompt: 'test',
-        seed: undefined,
-        output_format: 'png'
-      });
+    it('sends a Buffer as a typed Blob named image.png', async () => {
+      const buffer = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A]);
+      const formData = await buildFormData({ prompt: 'test' }, { image: buffer });
 
-      expect(formData).toBeDefined();
+      expect(entries(formData)[1]).toEqual(['image', { name: 'image.png', type: 'image/png', size: 6 }]);
+    });
+
+    it('skips image fields that were not given', async () => {
+      const formData = await buildFormData({ prompt: 'test' }, { image: undefined, mask: undefined });
+
+      expect(entries(formData)).toEqual([['prompt', 'test']]);
     });
   });
 });
@@ -675,5 +723,100 @@ describe('Utility Helper Functions', () => {
     it('should handle mixed case input', () => {
       expect(() => setLogLevel('DeBuG')).not.toThrow();
     });
+  });
+});
+
+// ==================== URL downloads (native fetch, 1.0) ====================
+
+describe('URL downloads', () => {
+  beforeEach(() => {
+    lookup.mockReset();
+    lookup.mockResolvedValue([{ address: '93.184.216.34', family: 4 }]);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('urlToBuffer returns the bytes of a validated URL', async () => {
+    stubFetch(() => imageResponse());
+    const buffer = await urlToBuffer('https://cdn.example/a.png');
+    expect(buffer.equals(PNG_BYTES)).toBe(true);
+  });
+
+  it('re-validates each redirect hop: a public URL that 302s to a private IP is refused', async () => {
+    const calls = stubFetch(() => new Response(null, { status: 302, headers: { location: 'https://10.0.0.1/meta' } }));
+    await expect(urlToBuffer('https://cdn.example/a.png')).rejects.toThrow('internal/private IP');
+    // The private target was never requested.
+    expect(calls.map(c => c.url)).toEqual(['https://cdn.example/a.png']);
+  });
+
+  it('refuses a redirect that downgrades to http', async () => {
+    stubFetch(() => new Response(null, { status: 301, headers: { location: 'http://cdn.example/a.png' } }));
+    await expect(urlToBuffer('https://cdn.example/a.png')).rejects.toThrow('Only HTTPS');
+  });
+
+  it('follows a redirect to another validated public host', async () => {
+    const calls = stubFetch((url) =>
+      url === 'https://cdn.example/a.png'
+        ? new Response(null, { status: 302, headers: { location: 'https://cdn2.example/a.png' } })
+        : imageResponse()
+    );
+    await urlToBuffer('https://cdn.example/a.png');
+    expect(calls.map(c => c.url)).toEqual(['https://cdn.example/a.png', 'https://cdn2.example/a.png']);
+  });
+
+  it('urlToBase64 validates its own argument (0.4.0 skipped this when called directly)', async () => {
+    const calls = stubFetch(() => imageResponse());
+    await expect(urlToBase64('https://127.0.0.1/a.png')).rejects.toThrow('internal/private');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('urlToBase64 encodes the downloaded bytes', async () => {
+    stubFetch(() => imageResponse());
+    expect(await urlToBase64('https://cdn.example/a.png')).toBe(PNG_BYTES.toString('base64'));
+  });
+
+  it('does not treat an error page as an image', async () => {
+    stubFetch(() => new Response('<html>not found</html>', { status: 404, headers: { 'content-type': 'text/html' } }));
+    await expect(urlToBuffer('https://cdn.example/missing.png')).rejects.toThrow('404');
+  });
+
+  it('aborts mid-stream once the body exceeds MAX_DOWNLOAD_SIZE', async () => {
+    const chunk = new Uint8Array(1024 * 1024);
+    let sent = 0;
+    const body = new ReadableStream({
+      pull(controller) {
+        // Endless unless the reader cancels: proves the cap is enforced while streaming.
+        sent += chunk.length;
+        controller.enqueue(chunk);
+      },
+    });
+    stubFetch(() => new Response(body, { status: 200, headers: { 'content-type': 'image/png' } }));
+    await expect(urlToBuffer('https://cdn.example/huge.png')).rejects.toThrow('exceeds maximum size');
+    expect(sent).toBeLessThanOrEqual(MAX_DOWNLOAD_SIZE + 2 * chunk.length);
+  });
+
+  it('downloadImage writes nothing when validation fails', async () => {
+    const dir = join(process.cwd(), 'test-temp-download');
+    const target = join(dir, 'x.png');
+    await fs.rm(dir, { recursive: true, force: true }); // a stale file would fake a failure
+    stubFetch(() => imageResponse());
+    await expect(downloadImage('https://169.254.169.254/latest', target)).rejects.toThrow();
+    expect(existsSync(target)).toBe(false);
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+});
+
+describe('detectImageMime', () => {
+  it.each([
+    [PNG_BYTES, 'image/png'],
+    [Buffer.from([0xFF, 0xD8, 0xFF, 0xE0]), 'image/jpeg'],
+    [Buffer.from('RIFF\0\0\0\0WEBPVP8 ', 'latin1'), 'image/webp'],
+    [Buffer.from('GIF89a', 'latin1'), 'image/gif'],
+    [Buffer.from('hello'), ''],
+    [Buffer.alloc(0), ''],
+  ])('%#', (buffer, expected) => {
+    expect(detectImageMime(buffer)).toBe(expected);
   });
 });

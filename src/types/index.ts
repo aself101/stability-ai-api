@@ -477,6 +477,12 @@ export interface WaitResultOptions {
   timeout?: number;
   /** Show animated spinner */
   showSpinner?: boolean;
+  /**
+   * Consecutive transient failures (429, 502–504, retryable network errors,
+   * timeouts) tolerated before giving up. Defaults to MAX_RETRIES (3). The
+   * count resets after any successful poll. 0 disables retrying.
+   */
+  maxRetries?: number;
 }
 
 // ==================== UTILITY TYPES ====================

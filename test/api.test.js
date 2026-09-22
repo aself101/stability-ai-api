@@ -57,71 +57,8 @@ describe('StabilityAPI Class', () => {
     });
   });
 
-  describe('Error Handling', () => {
-    it('should sanitize errors in production mode', () => {
-      const originalEnv = process.env.NODE_ENV;
-      process.env.NODE_ENV = 'production';
-
-      const error = new Error('Internal server details');
-      error.response = { status: 500 };
-
-      const sanitized = api._sanitizeErrorMessage(error);
-      expect(sanitized).not.toContain('Internal server details');
-      expect(sanitized).toBe('An error occurred while processing your request');
-
-      process.env.NODE_ENV = originalEnv;
-    });
-
-    it('should show detailed errors in development mode', () => {
-      const originalEnv = process.env.NODE_ENV;
-      process.env.NODE_ENV = 'development';
-
-      const error = new Error('Detailed error message');
-      const sanitized = api._sanitizeErrorMessage(error);
-      expect(sanitized).toBe('Detailed error message');
-
-      process.env.NODE_ENV = originalEnv;
-    });
-
-    it('should handle authentication errors in production', () => {
-      const originalEnv = process.env.NODE_ENV;
-      process.env.NODE_ENV = 'production';
-
-      const error = new Error('Auth failed');
-      error.response = { status: 401 };
-
-      const sanitized = api._sanitizeErrorMessage(error);
-      expect(sanitized).toBe('Authentication failed');
-
-      process.env.NODE_ENV = originalEnv;
-    });
-
-    it('should handle content moderation errors in production', () => {
-      const originalEnv = process.env.NODE_ENV;
-      process.env.NODE_ENV = 'production';
-
-      const error = new Error('Moderation');
-      error.response = { status: 403 };
-
-      const sanitized = api._sanitizeErrorMessage(error);
-      expect(sanitized).toBe('Content moderation flagged');
-
-      process.env.NODE_ENV = originalEnv;
-    });
-
-    it('should handle rate limit errors in production', () => {
-      const originalEnv = process.env.NODE_ENV;
-      process.env.NODE_ENV = 'production';
-
-      const error = new Error('Rate limit');
-      error.response = { status: 429 };
-
-      const sanitized = api._sanitizeErrorMessage(error);
-      expect(sanitized).toBe('Rate limit exceeded');
-
-      process.env.NODE_ENV = originalEnv;
-    });
-  });
+  // Error mapping (status → message, production sanitising) is exercised
+  // against real fetch responses in test/api-http.test.js.
 
   describe('API Method Signatures', () => {
     it('should expose all required public methods', () => {
@@ -171,17 +108,6 @@ describe('StabilityAPI Class', () => {
       expect(redacted.startsWith('xxx...')).toBe(true);
       expect(redacted.length).toBeLessThan(longKey.length);
     });
-
-    it('should have error sanitization for production', () => {
-      const originalEnv = process.env.NODE_ENV;
-      process.env.NODE_ENV = 'production';
-
-      const error = new Error('Sensitive internal error details');
-      const sanitized = api._sanitizeErrorMessage(error);
-      expect(sanitized).not.toContain('Sensitive');
-
-      process.env.NODE_ENV = originalEnv;
-    });
   });
 
   describe('Async Operations', () => {
@@ -220,91 +146,10 @@ describe('API Integration Patterns', () => {
   });
 });
 
-describe('Async Response Handling', () => {
-  let api;
-
-  beforeEach(() => {
-    api = new StabilityAPI('test-key');
-  });
-
-  describe('HTTP 200 with JSON task ID', () => {
-    it('should parse JSON task ID from arraybuffer response', async () => {
-      // This tests the fix for replace-background-and-relight endpoint
-      // which returns HTTP 200 with application/json containing task ID
-      const taskId = 'abc123-task-id';
-      const jsonResponse = JSON.stringify({ id: taskId });
-      const bufferData = Buffer.from(jsonResponse);
-
-      // Mock axios to return HTTP 200 with JSON content-type but arraybuffer data
-      const axiosMock = vi.fn().mockResolvedValue({
-        status: 200,
-        headers: {
-          'content-type': 'application/json'
-        },
-        data: bufferData
-      });
-
-      // Replace axios temporarily
-      const originalAxios = (await import('axios')).default;
-      vi.doMock('axios', () => ({ default: axiosMock }));
-
-      // The _makeFormDataRequest should parse the JSON from the buffer
-      // and return the parsed object with the task ID
-      // We verify the logic by checking our code handles Buffer responses
-      expect(Buffer.isBuffer(bufferData)).toBe(true);
-      const parsed = JSON.parse(bufferData.toString('utf8'));
-      expect(parsed.id).toBe(taskId);
-    });
-
-    it('should detect task ID in parsed JSON response', () => {
-      // Verify our JSON parsing logic works correctly
-      const testCases = [
-        { input: '{"id":"task-123"}', expectedId: 'task-123' },
-        { input: '{"id":"abc-def-ghi"}', expectedId: 'abc-def-ghi' },
-        { input: '{"status":"pending"}', expectedId: undefined }
-      ];
-
-      for (const { input, expectedId } of testCases) {
-        const buffer = Buffer.from(input);
-        const parsed = JSON.parse(buffer.toString('utf8'));
-        expect(parsed.id).toBe(expectedId);
-      }
-    });
-  });
-
-  describe('getResult endpoint', () => {
-    it('should use accept: */* header for results endpoint', () => {
-      // The results endpoint requires accept: */* not image/*
-      // This is critical for polling async tasks like replace-background-and-relight
-      const api = new StabilityAPI('test-key');
-      expect(api.getResult).toBeDefined();
-      expect(api.getResult.length).toBe(1); // Takes taskId parameter
-    });
-
-    it('should preserve authorization when custom headers are passed', () => {
-      // Verify that passing custom headers doesn't overwrite auth
-      // This tests the destructuring fix in _makeFormDataRequest
-      const api = new StabilityAPI('my-secret-key');
-      expect(api.apiKey).toBe('my-secret-key');
-      // The fix ensures { headers: { accept: '*/*' } } doesn't remove authorization
-    });
-  });
-
-  describe('replaceBackgroundAndRelight async flow', () => {
-    it('should be an async method that returns task for polling', () => {
-      const api = new StabilityAPI('test-key');
-      expect(api.replaceBackgroundAndRelight).toBeDefined();
-      expect(typeof api.replaceBackgroundAndRelight).toBe('function');
-    });
-
-    it('should call waitForResult when task ID is returned', () => {
-      // The method should detect task.id and call waitForResult
-      const api = new StabilityAPI('test-key');
-      expect(api.waitForResult).toBeDefined();
-      // waitForResult handles polling the results endpoint
-    });
-  });
-});
+// Async response handling (202 / 200-JSON task ids, results polling with
+// accept */*, auth preserved alongside custom headers, replace-background
+// polling) is tested against real fetch responses in test/api-http.test.js.
+// The tests that stood here until 1.0 asserted only that methods existed.
 
 describe('Method Parameter Requirements', () => {
   let api;
@@ -352,7 +197,7 @@ describe('Mocked Generate Method Calls', () => {
   beforeEach(async () => {
     api = new StabilityAPI('test-key');
     // Mock buildFormData to prevent file system access
-    const mockFormData = { append: vi.fn(), getHeaders: vi.fn(() => ({})) };
+    const mockFormData = new FormData();
     const utilsModule = await import('../src/utils.js');
     vi.spyOn(utilsModule, 'buildFormData').mockResolvedValue(mockFormData);
   });
@@ -409,7 +254,7 @@ describe('Mocked Upscale Method Calls', () => {
   beforeEach(async () => {
     api = new StabilityAPI('test-key');
     // Mock buildFormData to prevent file system access
-    const mockFormData = { append: vi.fn(), getHeaders: vi.fn(() => ({})) };
+    const mockFormData = new FormData();
     const utilsModule = await import('../src/utils.js');
     vi.spyOn(utilsModule, 'buildFormData').mockResolvedValue(mockFormData);
   });
@@ -532,7 +377,7 @@ describe('Edit Methods', () => {
 
     beforeEach(async () => {
       // Create a mock FormData-like object
-      const mockFormData = { append: vi.fn(), getHeaders: vi.fn(() => ({})) };
+      const mockFormData = new FormData();
       const utilsModule = await import('../src/utils.js');
       mockBuildFormData = vi.spyOn(utilsModule, 'buildFormData').mockResolvedValue(mockFormData);
     });
@@ -829,7 +674,7 @@ describe('Control Methods', () => {
 
     beforeEach(async () => {
       // Create a mock FormData-like object
-      const mockFormData = { append: vi.fn(), getHeaders: vi.fn(() => ({})) };
+      const mockFormData = new FormData();
       const utilsModule = await import('../src/utils.js');
       mockBuildFormData = vi.spyOn(utilsModule, 'buildFormData').mockResolvedValue(mockFormData);
     });

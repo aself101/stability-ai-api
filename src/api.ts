@@ -14,9 +14,9 @@
  * console.log('Image URL:', result.image_url);
  */
 
-import axios, { type AxiosError } from 'axios';
 import { logger, buildFormData, createSpinner } from './utils.js';
-import { BASE_URL, MODEL_ENDPOINTS, EDIT_ENDPOINTS, CONTROL_ENDPOINTS, DEFAULT_POLL_INTERVAL, DEFAULT_TIMEOUT } from './config.js';
+import { request, requestJson, StabilityHttpError, StabilityNetworkError, StabilityTimeoutError } from './http.js';
+import { BASE_URL, MODEL_ENDPOINTS, EDIT_ENDPOINTS, CONTROL_ENDPOINTS, DEFAULT_POLL_INTERVAL, DEFAULT_TIMEOUT, MAX_RETRIES } from './config.js';
 import type {
   ImageResult,
   TaskResult,
@@ -39,7 +39,27 @@ import type {
   ControlStyleTransferParams,
   ErrorResponseData,
 } from './types/index.js';
-import type FormDataNode from 'form-data';
+
+export { StabilityHttpError, StabilityNetworkError, StabilityTimeoutError } from './http.js';
+
+/** Idle timeout for API requests (resets on each chunk; see src/http.ts). */
+const API_TIMEOUT_MS = 30000;
+
+/** Statuses a poll may retry: throttling and gateway trouble, never client errors. */
+const TRANSIENT_STATUSES = new Set([429, 502, 503, 504]);
+
+/**
+ * Whether an error from a request is worth retrying. Classified on type and
+ * fields only — never message text. Until 1.0 this matched
+ * `err.message.includes('rate limit')` against a message that read
+ * 'Rate limit exceeded…' (never matched), and '502'/'503' against axios's dev
+ * message, which production sanitising replaced (never matched there either).
+ */
+export function isTransientError(error: unknown): boolean {
+  if (error instanceof StabilityHttpError) return TRANSIENT_STATUSES.has(error.status);
+  if (error instanceof StabilityNetworkError) return error.retryable;
+  return error instanceof StabilityTimeoutError;
+}
 
 /**
  * Stability AI API Client
@@ -102,169 +122,123 @@ export class StabilityAPI {
   }
 
   /**
-   * Sanitize error messages for production.
-   * Prevents information disclosure in production environments.
+   * Map a failed API response to the error the caller sees: a
+   * `StabilityHttpError` carrying the original status, Retry-After and parsed
+   * body, with a readable message. Under axios this threw a bare `Error`, so
+   * status and body were lost and callers could only match on message text.
    *
-   * @param error - Original error
-   * @returns Sanitized error message
+   * In production (`NODE_ENV=production`) unmapped statuses get a generic
+   * message to avoid disclosing upstream detail; the body stays on `.body`.
+   * Network and timeout errors pass through unchanged.
    */
-  private _sanitizeErrorMessage(error: AxiosError): string {
-    // In production, return generic error message
-    if (process.env.NODE_ENV === 'production') {
-      // Only expose safe error types
-      if (error.response?.status === 401) {
-        return 'Authentication failed';
-      } else if (error.response?.status === 403) {
-        return 'Content moderation flagged';
-      } else if (error.response?.status === 429) {
-        return 'Rate limit exceeded';
-      }
-      return 'An error occurred while processing your request';
-    }
+  private _toApiError(error: unknown): Error {
+    if (!(error instanceof StabilityHttpError)) return error as Error;
 
-    // In development, return detailed error
-    return error.message;
+    const { status, retryAfter, body } = error;
+    const errors = (body as ErrorResponseData | undefined)?.errors;
+    let message: string;
+    if (status === 401) {
+      message = 'Authentication failed. Check your API key.';
+    } else if (status === 403) {
+      message = 'Content moderation flagged your request.';
+    } else if (status === 413) {
+      message = 'Request payload too large (max 10MB).';
+    } else if (status === 429) {
+      message = 'Rate limit exceeded. Please wait before retrying.';
+    } else if (status === 400) {
+      message = `Invalid parameters: ${Array.isArray(errors) ? errors.join(', ') : JSON.stringify(body)}`;
+    } else if (process.env.NODE_ENV === 'production') {
+      message = 'An error occurred while processing your request';
+    } else {
+      message = `Request failed with status code ${status}${Array.isArray(errors) ? `: ${errors.join(', ')}` : ''}`;
+    }
+    logger.error(`HTTP ${status}: ${JSON.stringify(body)}`);
+    return new StabilityHttpError(message, status, retryAfter, body);
   }
 
   /**
-   * Make a multipart/form-data request to the Stability AI API.
+   * Make a request to the Stability AI API.
+   *
+   * Response shapes, by status and content-type:
+   * - 200 `image/*` — synchronous result: image bytes, with `finish-reason`
+   *   and `seed` carried in response headers.
+   * - 202 — async task still running: JSON body (`{ id, status }`). Under
+   *   axios this arrived as a raw ArrayBuffer and was returned unparsed.
+   * - 200 JSON — async submission answered with 200 (`{ id }`, e.g.
+   *   replace-background-and-relight) or any other JSON result.
    *
    * @param method - HTTP method (GET, POST)
    * @param endpoint - API endpoint path
-   * @param formData - Form data for POST requests
-   * @param options - Additional axios options
-   * @returns API response data or image buffer
+   * @param formData - Multipart body for POST requests
+   * @param options - Extra headers (e.g. `accept`)
+   * @returns Image result, task result, or parsed JSON
+   * @throws StabilityHttpError on a non-2xx response (see `_toApiError`)
+   * @throws StabilityNetworkError / StabilityTimeoutError on transport failure
    */
   private async _makeFormDataRequest(
-    method: string,
+    method: 'GET' | 'POST',
     endpoint: string,
-    formData: FormDataNode | null = null,
+    formData: FormData | null = null,
     options: { headers?: Record<string, string> } = {}
   ): Promise<ImageResult | TaskResult | Record<string, unknown>> {
     this._verifyApiKey();
 
     const url = `${this.baseUrl}${endpoint}`;
-
-    // Redact API key for logging
     const redactedKey = this._redactApiKey(this.apiKey);
     logger.debug(`Making ${method} request to ${url} (API key: ${redactedKey})`);
 
+    // No content-type here: fetch writes the multipart boundary itself.
+    const headers: Record<string, string> = {
+      'authorization': `Bearer ${this.apiKey}`,
+      'accept': 'image/*', // Request image bytes directly
+      ...options.headers
+    };
+
+    let response: Awaited<ReturnType<typeof request>>;
     try {
-      const headers: Record<string, string> = {
-        'authorization': `Bearer ${this.apiKey}`,
-        'accept': 'image/*', // Request image bytes directly
-        ...options.headers
-      };
-
-      // If formData provided, let it set its own content-type with boundary
-      if (formData && typeof formData.getHeaders === 'function') {
-        Object.assign(headers, formData.getHeaders());
-      }
-
-      const axiosConfig: {
-        method: string;
-        url: string;
-        headers: Record<string, string>;
-        timeout: number;
-        maxRedirects: number;
-        data?: unknown;
-        responseType?: 'arraybuffer';
-      } = {
+      response = await request(url, {
         method,
-        url,
         headers,
-        timeout: 30000, // 30 second timeout for API requests
-        maxRedirects: 5,
-      };
-
-      // Add form data for POST requests
-      if (formData && method === 'POST') {
-        axiosConfig.data = formData;
-      }
-
-      // For binary responses, we want arraybuffer
-      // Both 'image/*' and '*/*' expect binary data
-      if (headers['accept'] === 'image/*' || headers['accept'] === '*/*') {
-        axiosConfig.responseType = 'arraybuffer';
-      }
-
-      logger.debug(`Request config: ${JSON.stringify({ method, url, headers: { ...headers, authorization: `Bearer ${redactedKey}` } })}`);
-
-      const response = await axios(axiosConfig);
-
-      logger.debug(`Response status: ${response.status}`);
-      logger.debug(`Response headers: ${JSON.stringify(response.headers)}`);
-
-      // Return the response based on type
-      const contentType = response.headers['content-type'] as string | undefined;
-      if (response.status === 200 && contentType?.startsWith('image/')) {
-        // Synchronous response with image
-        logger.info(`Received image response (${(response.data as ArrayBuffer).byteLength} bytes)`);
-        return {
-          image: Buffer.from(response.data as ArrayBuffer),
-          finish_reason: response.headers['finish-reason'] as string | undefined,
-          seed: response.headers['seed'] as string | undefined
-        };
-      } else if (response.status === 202) {
-        // Async response with task ID
-        logger.info('Received async task ID');
-        return response.data as TaskResult;
-      } else if (response.status === 200 && contentType?.includes('application/json')) {
-        // Async endpoint returning task ID with HTTP 200 (e.g., replace-background-and-relight)
-        // Parse JSON from arraybuffer if needed
-        let data = response.data;
-        if (Buffer.isBuffer(data) || data instanceof ArrayBuffer) {
-          data = JSON.parse(Buffer.from(data as ArrayBuffer).toString('utf8'));
-        }
-        const dataObj = data as { id?: string };
-        if (dataObj.id) {
-          logger.info(`Received async task ID: ${dataObj.id}`);
-        }
-        return data as Record<string, unknown>;
-      } else {
-        // Other responses
-        return response.data as Record<string, unknown>;
-      }
+        ...(formData && method === 'POST' ? { form: formData } : {}),
+        timeoutMs: API_TIMEOUT_MS,
+        // The API does not redirect; refusing keeps the API key on api.stability.ai.
+        maxRedirects: 0,
+      });
     } catch (error) {
-      const axiosError = error as AxiosError;
-      logger.error(`Request failed: ${axiosError.message}`);
-
-      // Handle specific error cases
-      if (axiosError.response) {
-        const status = axiosError.response.status;
-        let data = axiosError.response.data as Buffer | ErrorResponseData;
-
-        // Parse Buffer responses to JSON
-        if (Buffer.isBuffer(data)) {
-          try {
-            data = JSON.parse(data.toString('utf8')) as ErrorResponseData;
-          } catch (parseError) {
-            const parseErr = parseError as Error;
-            logger.error(`Failed to parse error response buffer: ${parseErr.message}`);
-          }
-        }
-
-        logger.error(`HTTP ${status}: ${JSON.stringify(data)}`);
-
-        if (status === 401) {
-          throw new Error('Authentication failed. Check your API key.');
-        } else if (status === 403) {
-          throw new Error('Content moderation flagged your request.');
-        } else if (status === 413) {
-          throw new Error('Request payload too large (max 10MB).');
-        } else if (status === 429) {
-          throw new Error('Rate limit exceeded. Please wait before retrying.');
-        } else if (status === 400) {
-          // Extract validation errors if available
-          const errorData = data as ErrorResponseData;
-          const errorMsg = errorData.errors ? errorData.errors.join(', ') : JSON.stringify(data);
-          throw new Error(`Invalid parameters: ${errorMsg}`);
-        }
-      }
-
-      // Throw sanitized error
-      throw new Error(this._sanitizeErrorMessage(axiosError));
+      logger.error(`Request failed: ${(error as Error).message}`);
+      throw this._toApiError(error);
     }
+
+    const { status, headers: resHeaders, bytes } = response;
+    const contentType = resHeaders.get('content-type') ?? '';
+    logger.debug(`Response status: ${status}, content-type: ${contentType}`);
+
+    if (status === 200 && contentType.startsWith('image/')) {
+      logger.info(`Received image response (${bytes.length} bytes)`);
+      return {
+        image: bytes,
+        finish_reason: resHeaders.get('finish-reason') ?? undefined,
+        seed: resHeaders.get('seed') ?? undefined
+      };
+    }
+
+    const text = bytes.toString('utf8');
+    let data: Record<string, unknown> = {};
+    if (text.length > 0) {
+      try {
+        data = JSON.parse(text) as Record<string, unknown>;
+      } catch {
+        throw new StabilityNetworkError(`Expected an image or JSON from ${endpoint} but received ${contentType || 'no content-type'}: ${text.slice(0, 120)}`);
+      }
+    }
+    if (status === 202) {
+      logger.info('Received async task ID');
+      return data as unknown as TaskResult;
+    }
+    if (typeof data.id === 'string') {
+      logger.info(`Received async task ID: ${data.id}`);
+    }
+    return data;
   }
 
   /**
@@ -277,13 +251,16 @@ export class StabilityAPI {
   async waitForResult(taskId: string, {
     pollInterval = DEFAULT_POLL_INTERVAL,
     timeout = DEFAULT_TIMEOUT,
-    showSpinner = true
+    showSpinner = true,
+    maxRetries = MAX_RETRIES
   }: WaitResultOptions = {}): Promise<ImageResult> {
     logger.info(`Polling for task ${taskId} (interval: ${pollInterval}s, timeout: ${timeout}s)`);
 
     const startTime = Date.now();
     const timeoutMs = timeout * 1000;
     let attempt = 0;
+    let consecutiveFailures = 0;
+    let waitSeconds = pollInterval;
     let spinner: ReturnType<typeof createSpinner> | null = null;
 
     if (showSpinner) {
@@ -294,6 +271,7 @@ export class StabilityAPI {
     try {
       while (true) {
         attempt++;
+        waitSeconds = pollInterval;
         const elapsed = (Date.now() - startTime) / 1000;
 
         logger.debug(`Polling attempt ${attempt} (elapsed: ${elapsed.toFixed(1)}s)`);
@@ -316,17 +294,18 @@ export class StabilityAPI {
             const timeLeft = Math.max(0, timeout - elapsed).toFixed(0);
             spinner.update(`Processing... (${elapsed.toFixed(0)}s elapsed, ~${timeLeft}s remaining)`);
           }
+          consecutiveFailures = 0;
         } catch (error) {
-          const err = error as Error;
-          // Retry on transient errors
-          if (err.message.includes('rate limit') || err.message.includes('503') || err.message.includes('502')) {
-            logger.warn(`Transient error, will retry: ${err.message}`);
-            if (spinner) {
-              spinner.update(`Retrying after error...`);
-            }
-          } else {
-            // Permanent error, throw immediately
+          // Permanent errors throw immediately; transient ones retry up to
+          // maxRetries in a row, waiting at least as long as Retry-After asks.
+          if (!isTransientError(error) || ++consecutiveFailures > maxRetries) {
             throw error;
+          }
+          const retryAfter = error instanceof StabilityHttpError ? error.retryAfter : undefined;
+          waitSeconds = Math.max(pollInterval, retryAfter ?? 0);
+          logger.warn(`Transient error (${consecutiveFailures}/${maxRetries}), retrying in ${waitSeconds}s: ${(error as Error).message}`);
+          if (spinner) {
+            spinner.update(`Retrying after error...`);
           }
         }
 
@@ -336,7 +315,7 @@ export class StabilityAPI {
         }
 
         // Wait before next poll
-        await new Promise(resolve => setTimeout(resolve, pollInterval * 1000));
+        await new Promise(resolve => setTimeout(resolve, waitSeconds * 1000));
       }
     } finally {
       if (spinner) {
@@ -535,20 +514,21 @@ export class StabilityAPI {
     this._verifyApiKey();
 
     try {
-      const response = await axios.get<CreditsResult>(`${this.baseUrl}/v1/user/balance`, {
+      const data = await requestJson<CreditsResult>(`${this.baseUrl}/v1/user/balance`, {
         headers: {
-          'Authorization': `Bearer ${this.apiKey}`,
-          'Accept': 'application/json'
+          'authorization': `Bearer ${this.apiKey}`,
+          'accept': 'application/json'
         },
-        timeout: 30000
+        timeoutMs: API_TIMEOUT_MS,
+        maxRedirects: 0,
       });
 
-      logger.info(`Account balance: ${response.data.credits} credits`);
-      return response.data;
+      logger.info(`Account balance: ${data.credits} credits`);
+      return data;
     } catch (error) {
-      const axiosError = error as AxiosError;
-      logger.error(`Error fetching balance: ${this._sanitizeErrorMessage(axiosError)}`);
-      throw new Error(this._sanitizeErrorMessage(axiosError));
+      const apiError = this._toApiError(error);
+      logger.error(`Error fetching balance: ${apiError.message}`);
+      throw apiError;
     }
   }
 
