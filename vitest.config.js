@@ -41,7 +41,7 @@ export default defineConfig({
     setupFiles: ['test/setup.js'],
 
     // Include/exclude patterns
-    include: ['test/**/*.test.js'],
+    include: ['test/**/*.test.js', 'test/**/*.test.ts'],
     exclude: ['node_modules/**', 'datasets/**', 'docs/**', 'dist/**'],
 
     // Watch mode settings
