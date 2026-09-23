@@ -175,6 +175,13 @@ not redirect, and refusing to follow keeps the `Authorization` header from being
 anywhere but `api.stability.ai`. Image downloads do follow redirects, re-validating
 each hop (#10).
 
+**(1.0.1)** `request()` itself also drops credential headers (`authorization`,
+`proxy-authorization`, `cookie`, `x-key`) on any redirect that changes origin, as fetch's
+own redirect mode does for `authorization`. Here that is a backstop — the API calls follow
+no redirects and downloads carry no credentials — but bfl-api shares the loop and its
+authenticated calls did follow redirects, re-sending the key to any origin (bfl #16). The
+strip lives in the shared loop so a future authenticated call site cannot reopen it.
+
 `axios` and `form-data` are gone. Runtime dependencies are `commander`, `dotenv` and
 `winston`. Node 22 is required, the same as bfl.
 
@@ -224,7 +231,9 @@ again, so a fix to one should be carried to the other.
    are now judged by it like the mapped forms. Blocking the two prefixes outright
    was the alternative; judging by the embedded address keeps one rule for every
    IPv4-carrying form. Deprecated site-local `fec0::/10` is blocked (RFC 3879
-   retired it, but a host can still be configured to route it).
+   retired it, but a host can still be configured to route it). The re-review added
+   ISATAP (interface identifier `0:5efe` / `200:5efe` under any prefix, IPv4 in the
+   last 32 bits) under the same rule.
 
 ## 11. Retry on type, only while polling
 

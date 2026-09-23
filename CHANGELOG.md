@@ -21,15 +21,23 @@ parsers read the file as one document.
   connection is made. Refusals carry `code: 'ESSRFBLOCKED'` and the same message
   `validateImageUrl` uses. This was 1.0.0's documented known gap (docs/DECISIONS.md
   #10, #23).
-- **IPv6 tunnel addresses are judged by the IPv4 they carry.** 6to4 (`2002::/16`) and
-  Teredo (`2001::/32`, client address bit-inverted) passed the blocklist, so
+- **IPv6 tunnel addresses are judged by the IPv4 they carry.** 6to4 (`2002::/16`),
+  Teredo (`2001::/32`, client address bit-inverted) and ISATAP (`…:0:5efe:a.b.c.d` or
+  `…:200:5efe:a.b.c.d` under any prefix) passed the blocklist, so
   `https://[2002:7f00:1::1]` — 6to4 around 127.0.0.1 — was accepted. Deprecated
   site-local `fec0::/10` is now blocked too. Found by the pre-release security review.
-- **Signed URLs no longer reach logs or error messages.** Download log lines and the
-  `Failed to download image from …` errors carried the full URL; a signed URL's query
-  string is its credential, and `error`-level lines print by default. They now show
-  origin and path, with the query replaced by `?[redacted]`. Found by the pre-release
-  security review.
+- **Signed URLs no longer reach logs or error messages.** Download log lines, the
+  `Failed to download image from …` errors, `imageToBuffer`'s URL log line and the
+  `Invalid URL: …` error (whose text the outer download errors embed) carried the full
+  URL; a signed URL's query string is its credential, and `error`-level lines print by
+  default. They now show origin and path, with the query replaced by `?[redacted]`, and
+  an unparseable URL is not echoed at all. Found by the pre-release security review and
+  its re-review; the first cut missed the last two sites.
+- **Credential headers are dropped on a cross-origin redirect** inside the shared
+  `request()` loop (`authorization`, `proxy-authorization`, `cookie`, `x-key`), as
+  fetch's own redirect mode does for `authorization`. The API calls here already
+  follow no redirects (DECISIONS #9), so this is a backstop for any future
+  authenticated call site; it was a live leak in bfl-api, which shares the loop.
 
 ### Added
 
