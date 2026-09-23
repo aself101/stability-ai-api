@@ -127,8 +127,12 @@ function expandIPv6(ip: string): number[] | null {
 
 /**
  * The IPv4 address an IPv6 address embeds and routes to, if any: IPv4-mapped
- * (::ffff:0:0/96), IPv4-translated (::ffff:0:0:0/96), NAT64 (64:ff9b::/96) and
- * the deprecated IPv4-compatible form (::/96, excluding :: and ::1).
+ * (::ffff:0:0/96), IPv4-translated (::ffff:0:0:0/96), NAT64 (64:ff9b::/96),
+ * the deprecated IPv4-compatible form (::/96, excluding :: and ::1), and the
+ * two tunnel forms — 6to4 (2002::/16, IPv4 in hextets 1-2) and Teredo
+ * (2001::/32, the client IPv4 bit-inverted in the last 32 bits). The tunnel
+ * forms were added in 1.0.1 after the security-analyst review; a relay
+ * delivers them to the embedded IPv4, so they are judged by it.
  *
  * Until 1.0 only the *dotted* mapped form was recognised. Node's URL parser
  * normalises https://[::ffff:127.0.0.1] to [::ffff:7f00:1], so the hex form —
@@ -142,6 +146,9 @@ function embeddedIPv4(ip: string): string | null {
   const isTranslated = zero(0, 4) && h[4] === 0xffff && h[5] === 0;
   const isNat64 = h[0] === 0x64 && h[1] === 0xff9b && zero(2, 6);
   const isCompatible = zero(0, 6) && (h[6] !== 0 || h[7] > 1);
+  const quad = (hi: number, lo: number) => [hi >> 8, hi & 0xff, lo >> 8, lo & 0xff].join('.');
+  if (h[0] === 0x2002) return quad(h[1], h[2]); // 6to4
+  if (h[0] === 0x2001 && h[1] === 0) return quad(h[6] ^ 0xffff, h[7] ^ 0xffff); // Teredo client
   if (!(isMapped || isTranslated || isNat64 || isCompatible)) return null;
   return [h[6] >> 8, h[6] & 0xff, h[7] >> 8, h[7] & 0xff].join('.');
 }
@@ -198,6 +205,7 @@ function isBlockedIP(ip: string): boolean {
     // implied leading zeros (fd1:: is 0x0fd1), so exactly four are required.
     /^fe[89ab][0-9a-f]:/,        // IPv6 link-local (fe80::/10)
     /^f[cd][0-9a-f]{2}:/,        // IPv6 unique local (fc00::/7)
+    /^fe[c-f][0-9a-f]:/,         // IPv6 site-local, deprecated but routable if configured (fec0::/10)
   ];
 
   return blockedPatterns.some(pattern => pattern.test(cleanIP));

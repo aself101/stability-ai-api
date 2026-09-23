@@ -1315,7 +1315,7 @@ datasets/
 ### SSRF Protection
 - All image URLs validated before download; HTTPS only
 - Blocks loopback, private (`10/8`, `172.16/12`, `192.168/16`), link-local and metadata (`169.254/16`, `metadata.google.internal`), carrier-grade NAT (`100.64/10`), benchmarking (`198.18/15`), `0/8`, `192.0.0/24`, multicast/reserved (`224/3`); IPv6 loopback, link-local (`fe80::/10`), unique-local (`fc00::/7`) and multicast (`ff00::/8`)
-- IPv6 addresses that embed an IPv4 address — mapped (`::ffff:…`, dotted or hex), translated, NAT64 (`64:ff9b::/96`), IPv4-compatible — are judged by the IPv4 they route to
+- IPv6 addresses that embed an IPv4 address — mapped (`::ffff:…`, dotted or hex), translated, NAT64 (`64:ff9b::/96`), IPv4-compatible, 6to4 (`2002::/16`), Teredo (`2001::/32`) — are judged by the IPv4 they route to; deprecated site-local `fec0::/10` is blocked
 - Domain names are resolved and **every** returned address is checked (a name with one public and one private record is refused)
 - Every redirect hop is re-validated before it is followed
 - **DNS rebinding is closed (1.0.1):** downloads connect through an undici dispatcher whose lookup checks the addresses the socket is actually given, so a name that resolves public at validation and private at connect time is refused before any connection is made (docs/DECISIONS.md #10, #23)

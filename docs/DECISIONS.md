@@ -218,6 +218,13 @@ again, so a fix to one should be carried to the other.
    calls to `api.stability.ai` keep the default dispatcher — a fixed host with no
    redirects has no rebinding surface worth a second pool. The dependency this needs
    is pinned to major 7 (#23).
+6. **(1.0.1, pre-release security review)** The tunnel forms. 6to4 (`2002::/16`)
+   carries an IPv4 in hextets 1-2 and Teredo (`2001::/32`) carries the client IPv4
+   bit-inverted in the last 32 bits; a relay delivers either to that IPv4, so both
+   are now judged by it like the mapped forms. Blocking the two prefixes outright
+   was the alternative; judging by the embedded address keeps one rule for every
+   IPv4-carrying form. Deprecated site-local `fec0::/10` is blocked (RFC 3879
+   retired it, but a host can still be configured to route it).
 
 ## 11. Retry on type, only while polling
 

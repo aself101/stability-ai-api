@@ -21,6 +21,10 @@ parsers read the file as one document.
   connection is made. Refusals carry `code: 'ESSRFBLOCKED'` and the same message
   `validateImageUrl` uses. This was 1.0.0's documented known gap (docs/DECISIONS.md
   #10, #23).
+- **IPv6 tunnel addresses are judged by the IPv4 they carry.** 6to4 (`2002::/16`) and
+  Teredo (`2001::/32`, client address bit-inverted) passed the blocklist, so
+  `https://[2002:7f00:1::1]` — 6to4 around 127.0.0.1 — was accepted. Deprecated
+  site-local `fec0::/10` is now blocked too. Found by the pre-release security review.
 
 ### Added
 

@@ -313,6 +313,29 @@ describe('Image Validation (Security)', () => {
       await expect(validateImageUrl(url)).rejects.toThrow(/internal|private|localhost/);
     });
 
+    // 6to4 (2002::/16) carries an IPv4 in hextets 1-2; Teredo (2001::/32)
+    // carries the client IPv4 bit-inverted in the last 32 bits. fec0::/10 is
+    // deprecated site-local. All three passed 1.0.1's first cut (security-analyst).
+    it.each([
+      ['https://[2002:7f00:1::1]/x.png', '6to4 wrapping 127.0.0.1'],
+      ['https://[2002:c0a8:101::1]/x.png', '6to4 wrapping 192.168.1.1'],
+      ['https://[2002:a9fe:a9fe::1]/x.png', '6to4 wrapping metadata'],
+      ['https://[2001:0:4136:e378:8000:63bf:f5ff:fffe]/x.png', 'Teredo, client 10.0.0.1'],
+      ['https://[2001:0:4136:e378:8000:63bf:80ff:fffe]/x.png', 'Teredo, client 127.0.0.1'],
+      ['https://[fec0::1]/x.png', 'site-local fec0::/10'],
+      ['https://[feff::1]/x.png', 'site-local, top of fec0::/10'],
+    ])('blocks %s (%s)', async (url) => {
+      await expect(validateImageUrl(url)).rejects.toThrow(/internal|private|localhost/);
+    });
+
+    it.each([
+      'https://[2002:5db8:d822::1]/x.png',
+      'https://[2001:0:4136:e378:8000:63bf:a247:27dd]/x.png',
+      'https://[2001:db9::1]/x.png',
+    ])('allows tunnel forms wrapping a public IPv4, and non-Teredo 2001:: %s', async (url) => {
+      await expect(validateImageUrl(url)).resolves.toBe(url);
+    });
+
     it.each(['https://100.128.0.1/x.png', 'https://[::ffff:5db8:d822]/x.png', 'https://[2606:4700::6810:84e5]/x.png'])(
       'allows public %s', async (url) => {
         await expect(validateImageUrl(url)).resolves.toBe(url);
