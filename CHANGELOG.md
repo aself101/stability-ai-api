@@ -31,8 +31,10 @@ parsers read the file as one document.
   `Invalid URL: …` error (whose text the outer download errors embed) carried the full
   URL; a signed URL's query string is its credential, and `error`-level lines print by
   default. They now show origin and path, with the query replaced by `?[redacted]`, and
-  an unparseable URL is not echoed at all. Found by the pre-release security review and
-  its re-review; the first cut missed the last two sites.
+  an unparseable URL is not echoed at all. The CLI's image-input log lines (`generate`
+  image-to-image, `upscale`, `edit`, `control`) go through the same redaction, and a
+  test fails if any log line in `cli.ts` echoes an image option raw. Found by three
+  rounds of pre-release security review; each earlier cut missed a site.
 - **Credential headers are dropped on a cross-origin redirect** inside the shared
   `request()` loop (`authorization`, `proxy-authorization`, `cookie`, `x-key`), as
   fetch's own redirect mode does for `authorization`. The API calls here already

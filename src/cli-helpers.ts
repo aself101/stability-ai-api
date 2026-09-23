@@ -12,6 +12,7 @@ import path from 'path';
 import { InvalidArgumentError } from 'commander';
 import { getOutputDir } from './config.js';
 import { writeToFile, ensureDirectory, promptToFilename, generateTimestampedFilename, detectImageMime, logger } from './utils.js';
+import { redactUrl } from './http.js';
 import type { ImageResult, SD3Params, UpscaleParams } from './types/index.js';
 
 export interface GenerateOptions {
@@ -94,6 +95,18 @@ export function parseIntOption(value: string): number {
     throw new InvalidArgumentError(`"${value}" is not an integer.`);
   }
   return n;
+}
+
+/**
+ * A user-supplied input as it may appear in a log line: a local path as given,
+ * a URL with its query redacted (a signed URL's query is its credential).
+ * Every CLI line that echoes an image input goes through this, so a command
+ * that starts accepting URLs cannot reopen the leak one log line at a time —
+ * which is how the security re-review kept finding "one more site".
+ */
+export function displayInput(value: string | undefined): string {
+  if (value === undefined) return '';
+  return /^https?:\/\//i.test(value) ? redactUrl(value) : value;
 }
 
 /** Levels the CLI documents for --log-level; winston's http/verbose/silly are not offered. */

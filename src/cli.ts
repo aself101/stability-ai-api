@@ -46,6 +46,7 @@ import {
   parseIntOption,
   parseFloatOption,
   parseLogLevel,
+  displayInput,
   saveImageResult,
   type GenerateOptions,
   type UpscaleOptions,
@@ -664,7 +665,7 @@ async function handleGenerateCommand(model: string, options: GenerateOptions, gl
 
       const params = buildGenerateParams(model, prompt, options);
       if (params.image) {
-        logger.info('Image-to-image: using input image ' + params.image);
+        logger.info('Image-to-image: using input image ' + displayInput(params.image));
       }
 
       // Validate parameters. The spread gives the typed params an anonymous
@@ -739,7 +740,7 @@ async function handleUpscaleCommand(model: string, options: UpscaleOptions, glob
 
     // Validate input image exists
     if (!existsSync(options.image)) {
-      logger.error(`Error: Image file not found: ${options.image}`);
+      logger.error(`Error: Image file not found: ${displayInput(options.image)}`);
       process.exit(1);
     }
 
@@ -752,7 +753,7 @@ async function handleUpscaleCommand(model: string, options: UpscaleOptions, glob
     logger.info('='.repeat(60));
     logger.info('Starting image upscale');
     logger.info(`Model: ${model}`);
-    logger.info(`Input: ${options.image}`);
+    logger.info(`Input: ${displayInput(options.image)}`);
     logger.info('='.repeat(60));
 
     const params = buildUpscaleParams(model, options);
@@ -888,7 +889,7 @@ async function handleEditCommand(operation: string, options: EditOptions, global
 
     // Validate input image exists
     if (!existsSync(options.image)) {
-      logger.error(`Error: Image file not found: ${options.image}`);
+      logger.error(`Error: Image file not found: ${displayInput(options.image)}`);
       process.exit(1);
     }
 
@@ -900,7 +901,7 @@ async function handleEditCommand(operation: string, options: EditOptions, global
 
     logger.info('='.repeat(60));
     logger.info(`Starting edit operation: ${operation}`);
-    logger.info(`Input: ${options.image}`);
+    logger.info(`Input: ${displayInput(options.image)}`);
     logger.info('='.repeat(60));
 
     // Build parameters based on operation
@@ -1097,17 +1098,17 @@ async function handleControlCommand(operation: string, options: ControlOptions, 
     // For style-transfer, validate both images exist
     if (operation === 'style-transfer') {
       if (!options.initImage || !existsSync(options.initImage)) {
-        logger.error(`Error: Init image file not found: ${options.initImage}`);
+        logger.error(`Error: Init image file not found: ${displayInput(options.initImage)}`);
         process.exit(1);
       }
       if (!options.styleImage || !existsSync(options.styleImage)) {
-        logger.error(`Error: Style image file not found: ${options.styleImage}`);
+        logger.error(`Error: Style image file not found: ${displayInput(options.styleImage)}`);
         process.exit(1);
       }
     } else {
       // Validate input image exists for other operations
       if (!options.image || !existsSync(options.image)) {
-        logger.error(`Error: Image file not found: ${options.image}`);
+        logger.error(`Error: Image file not found: ${displayInput(options.image)}`);
         process.exit(1);
       }
     }
@@ -1121,10 +1122,10 @@ async function handleControlCommand(operation: string, options: ControlOptions, 
     logger.info('='.repeat(60));
     logger.info(`Starting control operation: ${operation}`);
     if (operation === 'style-transfer') {
-      logger.info(`Init image: ${options.initImage}`);
-      logger.info(`Style image: ${options.styleImage}`);
+      logger.info(`Init image: ${displayInput(options.initImage)}`);
+      logger.info(`Style image: ${displayInput(options.styleImage)}`);
     } else {
-      logger.info(`Input: ${options.image}`);
+      logger.info(`Input: ${displayInput(options.image)}`);
     }
     if (options.prompt) {
       logger.info(`Prompt: "${options.prompt}"`);

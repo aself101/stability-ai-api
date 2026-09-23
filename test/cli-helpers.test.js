@@ -20,6 +20,7 @@ import {
   parseIntOption,
   parseFloatOption,
   parseLogLevel,
+  displayInput,
   saveImageResult,
 } from '../src/cli-helpers.js';
 import { Command } from 'commander';
@@ -305,5 +306,39 @@ describe('parseLogLevel under commander', () => {
   });
   it.each(['verbose', 'http', 'silly'])('rejects winston-only level %s (undocumented on the CLI)', (level) => {
     expect(() => parse(['--log-level', level])).toThrow(/error, warn, info, debug/);
+  });
+});
+
+describe('displayInput (log-safe echo of image inputs)', () => {
+  it('redacts the query of a URL input', () => {
+    expect(displayInput('https://cdn.example/a.png?sig=SECRET')).toBe('https://cdn.example/a.png?[redacted]');
+    expect(displayInput('HTTP://cdn.example/a.png?sig=SECRET')).not.toContain('SECRET');
+  });
+  it('leaves a local path as given', () => {
+    expect(displayInput('./photos/cat?.png')).toBe('./photos/cat?.png');
+  });
+  it('renders undefined as empty', () => {
+    expect(displayInput(undefined)).toBe('');
+  });
+});
+
+describe('cli.ts echoes image inputs only through displayInput', () => {
+  // Static guard: the security re-reviews found raw echoes one site at a time.
+  // Any log line interpolating an image option directly fails here instead.
+  const RAW_ECHO = /(\$\{(options|params)\.(image|initImage|styleImage|mask)\})|(\+\s*(options|params)\.(image|initImage|styleImage|mask)\b)/;
+  it('has no raw interpolation of an image option in a log line', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(new URL('../src/cli.ts', import.meta.url), 'utf8');
+    const offenders = source.split('\n')
+      .map((line, i) => ({ line: line.trim(), n: i + 1 }))
+      .filter(({ line }) => /logger\.(debug|info|warn|error)\(/.test(line) && RAW_ECHO.test(line));
+    expect(offenders).toEqual([]);
+  });
+  it('control: the guard matches the pre-fix form of the line', () => {
+    const before = "logger.info('Image-to-image: using input image ' + params.image);";
+    const before2 = 'logger.info(`Input: ${options.image}`);';
+    expect(RAW_ECHO.test(before)).toBe(true);
+    expect(RAW_ECHO.test(before2)).toBe(true);
+    expect(RAW_ECHO.test('logger.info(`Input: ${displayInput(options.image)}`);')).toBe(false);
   });
 });
