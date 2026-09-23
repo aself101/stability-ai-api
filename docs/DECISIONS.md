@@ -234,6 +234,13 @@ again, so a fix to one should be carried to the other.
    retired it, but a host can still be configured to route it). The re-review added
    ISATAP (interface identifier `0:5efe` / `200:5efe` under any prefix, IPv4 in the
    last 32 bits) under the same rule.
+7. **(1.0.1) Where a URL may be written down.** Log lines, error messages and the
+   metadata file all show an input URL as origin + path, the query `?[redacted]`:
+   a signed URL's query is its credential, and none of those places has a use for
+   it. Four review rounds each found one more site (download errors, the
+   `Invalid URL` message nested inside them, CLI echoes, the metadata file), so the
+   CLI echoes go through one helper (`displayInput`), a test parses every logger
+   call in `cli.ts`, and the metadata goes through `recordSafeParams`.
 
 ## 11. Retry on type, only while polling
 

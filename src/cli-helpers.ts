@@ -109,6 +109,19 @@ export function displayInput(value: string | undefined): string {
   return /^https?:\/\//i.test(value) ? redactUrl(value) : value;
 }
 
+/**
+ * Parameters as recorded in the metadata file: URL strings (and URLs in
+ * arrays) with their query redacted, everything else as sent. The metadata
+ * is a record of the call, not a way to replay it, so an input URL's
+ * signature has no use there — and the file outlives the URL's validity on
+ * disk, in backups and in synced folders (security review, round 4).
+ */
+export function recordSafeParams(params: object): Record<string, unknown> {
+  const safe = (v: unknown): unknown =>
+    typeof v === 'string' ? displayInput(v) : Array.isArray(v) ? v.map(safe) : v;
+  return Object.fromEntries(Object.entries(params).map(([k, v]) => [k, safe(v)]));
+}
+
 /** Levels the CLI documents for --log-level; winston's http/verbose/silly are not offered. */
 export const CLI_LOG_LEVELS = ['error', 'warn', 'info', 'debug'] as const;
 
@@ -351,7 +364,7 @@ export async function saveImageResult(
   const metadata = {
     model,
     timestamp: new Date().toISOString(),
-    parameters: params,
+    parameters: recordSafeParams(params),
     result: {
       finish_reason: result.finish_reason,
       seed: result.seed,

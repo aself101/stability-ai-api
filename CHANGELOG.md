@@ -48,8 +48,11 @@ parsers read the file as one document.
   default. They now show origin and path, with the query replaced by `?[redacted]`, and
   an unparseable URL is not echoed at all. The CLI's image-input log lines (`generate`
   image-to-image, `upscale`, `edit`, `control`) go through the same redaction, and a
-  test fails if any log line in `cli.ts` echoes an image option raw. Found by three
-  rounds of pre-release security review; each earlier cut missed a site.
+  test fails if any logger call in `cli.ts` echoes an image option raw — however the
+  call is wrapped or concatenated. The `_metadata.json` saved beside each image records
+  its `parameters` the same way (it stored an input URL's signature verbatim, on disk,
+  indefinitely). Found by four rounds of pre-release security review; each earlier
+  cut missed a site.
 - **Credential headers are dropped on a cross-origin redirect** inside the shared
   `request()` loop (`authorization`, `proxy-authorization`, `cookie`, `x-key`), as
   fetch's own redirect mode does for `authorization`. The API calls here already

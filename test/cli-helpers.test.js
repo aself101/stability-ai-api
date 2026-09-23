@@ -21,6 +21,7 @@ import {
   parseFloatOption,
   parseLogLevel,
   displayInput,
+  recordSafeParams,
   saveImageResult,
 } from '../src/cli-helpers.js';
 import { Command } from 'commander';
@@ -169,6 +170,20 @@ describe('saveImageResult', () => {
 
   beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'sai-save-')); });
   afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+
+  it('keeps a signed input URL\'s query out of the metadata file', async () => {
+    const signed = 'https://cdn.example/user/x.png?X-Signature=SECRET-TOKEN&Expires=9';
+    const { metadataPath } = await saveImageResult(
+      { image: PNG_BYTES, finish_reason: 'SUCCESS' }, 'p', 'sd3',
+      { prompt: 'p', image: signed, strength: 0.5, output_format: 'png' }, dir
+    );
+    const text = readFileSync(metadataPath, 'utf8');
+    expect(text).not.toContain('SECRET-TOKEN');
+    const meta = JSON.parse(text);
+    expect(meta.parameters.image).toBe('https://cdn.example/user/x.png?[redacted]');
+    expect(meta.parameters.strength).toBe(0.5);
+    expect(meta.parameters.prompt).toBe('p');
+  });
 
   it('writes the image and metadata under <dir>/<model>/, named from the prompt, with the requested extension', async () => {
     const { imagePath, metadataPath } = await saveImageResult(
@@ -323,22 +338,99 @@ describe('displayInput (log-safe echo of image inputs)', () => {
 });
 
 describe('cli.ts echoes image inputs only through displayInput', () => {
-  // Static guard: the security re-reviews found raw echoes one site at a time.
-  // Any log line interpolating an image option directly fails here instead.
-  const RAW_ECHO = /(\$\{(options|params)\.(image|initImage|styleImage|mask)\})|(\+\s*(options|params)\.(image|initImage|styleImage|mask)\b)/;
-  it('has no raw interpolation of an image option in a log line', async () => {
+  // Static guard, rebuilt after round 4 of the security review showed the
+  // per-line regex missed multi-line calls and value-first concatenation.
+  // Each logger.*( ... ) call is extracted whole (parentheses balanced, string
+  // and template-literal contents skipped), and every reference to an
+  // image-bearing option inside it must sit directly inside displayInput(.
+  const IMAGE_REF = /\b(?:options|params|opts|globalOptions)\.(\w*(?:[iI]mage|[mM]ask|[rR]eference|[uU]rl)\w*)\b/g;
+
+  function loggerCalls(source) {
+    const calls = [];
+    const start = /\blogger\.(?:debug|info|warn|error)\(/g;
+    let m;
+    while ((m = start.exec(source))) {
+      let i = start.lastIndex;
+      let depth = 1;
+      let quote = null;
+      while (i < source.length && depth > 0) {
+        const c = source[i];
+        if (quote) {
+          if (c === '\\') { i += 2; continue; }
+          if (c === quote) quote = null;
+        } else if (c === '"' || c === "'" || c === '`') {
+          quote = c;
+        } else if (c === '(') {
+          depth += 1;
+        } else if (c === ')') {
+          depth -= 1;
+        }
+        i += 1;
+      }
+      calls.push({ text: source.slice(m.index, i), line: source.slice(0, m.index).split('\n').length });
+    }
+    return calls;
+  }
+
+  function rawRefs(callText) {
+    const found = [];
+    for (const ref of callText.matchAll(IMAGE_REF)) {
+      const before = callText.slice(0, ref.index);
+      if (!/displayInput\(\s*$/.test(before)) found.push(ref[0]);
+    }
+    return found;
+  }
+
+  function offenders(source) {
+    return loggerCalls(source)
+      .map(call => ({ line: call.line, refs: rawRefs(call.text) }))
+      .filter(entry => entry.refs.length > 0);
+  }
+
+  it('has no raw image option inside any logger call in cli.ts', async () => {
     const { readFileSync } = await import('node:fs');
     const source = readFileSync(new URL('../src/cli.ts', import.meta.url), 'utf8');
-    const offenders = source.split('\n')
-      .map((line, i) => ({ line: line.trim(), n: i + 1 }))
-      .filter(({ line }) => /logger\.(debug|info|warn|error)\(/.test(line) && RAW_ECHO.test(line));
-    expect(offenders).toEqual([]);
+    expect(loggerCalls(source).length).toBeGreaterThan(20);
+    expect(offenders(source)).toEqual([]);
   });
-  it('control: the guard matches the pre-fix form of the line', () => {
-    const before = "logger.info('Image-to-image: using input image ' + params.image);";
-    const before2 = 'logger.info(`Input: ${options.image}`);';
-    expect(RAW_ECHO.test(before)).toBe(true);
-    expect(RAW_ECHO.test(before2)).toBe(true);
-    expect(RAW_ECHO.test('logger.info(`Input: ${displayInput(options.image)}`);')).toBe(false);
+
+  it.each([
+    ["logger.info('Image-to-image: using input image ' + params.image);", 'prefix concatenation'],
+    ['logger.info(`Input: ${options.image}`);', 'template literal'],
+    ["logger.error(options.image + ' not found');", 'value-first concatenation'],
+    ['logger.info(\n  `Input: ${options.image}`\n);', 'multi-line call'],
+    ["logger.info('Input: ' +\n  options.initImage);", 'multi-line concatenation'],
+    ['logger.info(`Input:\n${options.styleImage}\ndone`);', 'multi-line template literal'],
+    ['logger.info(`Ref: ${options.backgroundReference}`);', 'a field outside the old fixed list'],
+  ])('control: flags %s (%s)', (code) => {
+    expect(offenders(code)).toHaveLength(1);
+  });
+
+  it.each([
+    'logger.info(`Input: ${displayInput(options.image)}`);',
+    "logger.info('Input: ' + displayInput(\n  options.image));",
+    "logger.info('Image-to-image: using input image ' + displayInput(params.image));",
+  ])('control: accepts the wrapped form %s', (code) => {
+    expect(offenders(code)).toEqual([]);
+  });
+});
+
+
+describe('recordSafeParams', () => {
+  it('redacts URL strings, element-wise in arrays, and leaves other values alone', () => {
+    const out = recordSafeParams({
+      image: 'https://cdn.example/a.png?sig=S',
+      refs: ['https://cdn.example/b.png?sig=S', './local.png'],
+      path: './photos/x?.png',
+      n: 3,
+      flag: true,
+    });
+    expect(out).toEqual({
+      image: 'https://cdn.example/a.png?[redacted]',
+      refs: ['https://cdn.example/b.png?[redacted]', './local.png'],
+      path: './photos/x?.png',
+      n: 3,
+      flag: true,
+    });
   });
 });
