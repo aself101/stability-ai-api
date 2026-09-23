@@ -117,8 +117,18 @@ export function displayInput(value: string | undefined): string {
  * disk, in backups and in synced folders (security review, round 4).
  */
 export function recordSafeParams(params: object): Record<string, unknown> {
-  const safe = (v: unknown): unknown =>
-    typeof v === 'string' ? displayInput(v) : Array.isArray(v) ? v.map(safe) : v;
+  // Recurses into plain objects and unwraps URL instances (JSON.stringify
+  // would serialize a URL's full href): every params builder is flat today,
+  // but the next shape change must not leak silently (round-5 review).
+  const safe = (v: unknown): unknown => {
+    if (typeof v === 'string') return displayInput(v);
+    if (v instanceof URL) return redactUrl(v.href);
+    if (Array.isArray(v)) return v.map(safe);
+    if (v !== null && typeof v === 'object' && Object.getPrototypeOf(v) === Object.prototype) {
+      return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, safe(x)]));
+    }
+    return v;
+  };
   return Object.fromEntries(Object.entries(params).map(([k, v]) => [k, safe(v)]));
 }
 

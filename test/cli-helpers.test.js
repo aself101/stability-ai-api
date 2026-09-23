@@ -25,6 +25,7 @@ import {
   saveImageResult,
 } from '../src/cli-helpers.js';
 import { Command } from 'commander';
+import ts from 'typescript';
 import { PNG_BYTES } from './helpers/fetch-mock.js';
 
 describe('buildGenerateParams', () => {
@@ -338,60 +339,50 @@ describe('displayInput (log-safe echo of image inputs)', () => {
 });
 
 describe('cli.ts echoes image inputs only through displayInput', () => {
-  // Static guard, rebuilt after round 4 of the security review showed the
-  // per-line regex missed multi-line calls and value-first concatenation.
-  // Each logger.*( ... ) call is extracted whole (parentheses balanced, string
-  // and template-literal contents skipped), and every reference to an
-  // image-bearing option inside it must sit directly inside displayInput(.
-  const IMAGE_REF = /\b(?:options|params|opts|globalOptions)\.(\w*(?:[iI]mage|[mM]ask|[rR]eference|[uU]rl)\w*)\b/g;
+  // Static guard. Round 4 of the security review defeated a per-line regex;
+  // round 5 defeated a hand-written quote tracker (a nested template literal
+  // containing ')' ended the call early). This version parses cli.ts with the
+  // TypeScript compiler: every image/mask/reference/url option reference in a
+  // logger.*() argument must be the direct argument of displayInput().
+  const IMAGE_OBJ = /^(options|params|opts|globalOptions)$/;
+  const IMAGE_PROP = /(image|mask|reference|url)/i;
 
-  function loggerCalls(source) {
+  function analyse(code) {
+    const sf = ts.createSourceFile('cli.ts', code, ts.ScriptTarget.Latest, true);
     const calls = [];
-    const start = /\blogger\.(?:debug|info|warn|error)\(/g;
-    let m;
-    while ((m = start.exec(source))) {
-      let i = start.lastIndex;
-      let depth = 1;
-      let quote = null;
-      while (i < source.length && depth > 0) {
-        const c = source[i];
-        if (quote) {
-          if (c === '\\') { i += 2; continue; }
-          if (c === quote) quote = null;
-        } else if (c === '"' || c === "'" || c === '`') {
-          quote = c;
-        } else if (c === '(') {
-          depth += 1;
-        } else if (c === ')') {
-          depth -= 1;
-        }
-        i += 1;
+    const offenders = [];
+    const isLoggerCall = (n) =>
+      ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) &&
+      ts.isIdentifier(n.expression.expression) && n.expression.expression.text === 'logger' &&
+      /^(debug|info|warn|error)$/.test(n.expression.name.text);
+    const isImageRef = (n) =>
+      ts.isPropertyAccessExpression(n) && ts.isIdentifier(n.expression) &&
+      IMAGE_OBJ.test(n.expression.text) && IMAGE_PROP.test(n.name.text);
+    const isWrapped = (n) =>
+      ts.isCallExpression(n.parent) && ts.isIdentifier(n.parent.expression) &&
+      n.parent.expression.text === 'displayInput';
+    const scan = (node, line) => {
+      if (isImageRef(node) && !isWrapped(node)) offenders.push({ line, ref: node.getText(sf) });
+      ts.forEachChild(node, child => scan(child, line));
+    };
+    const walk = (node) => {
+      if (isLoggerCall(node)) {
+        const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
+        calls.push(line);
+        node.arguments.forEach(arg => scan(arg, line));
       }
-      calls.push({ text: source.slice(m.index, i), line: source.slice(0, m.index).split('\n').length });
-    }
-    return calls;
-  }
-
-  function rawRefs(callText) {
-    const found = [];
-    for (const ref of callText.matchAll(IMAGE_REF)) {
-      const before = callText.slice(0, ref.index);
-      if (!/displayInput\(\s*$/.test(before)) found.push(ref[0]);
-    }
-    return found;
-  }
-
-  function offenders(source) {
-    return loggerCalls(source)
-      .map(call => ({ line: call.line, refs: rawRefs(call.text) }))
-      .filter(entry => entry.refs.length > 0);
+      ts.forEachChild(node, walk);
+    };
+    walk(sf);
+    return { calls, offenders };
   }
 
   it('has no raw image option inside any logger call in cli.ts', async () => {
     const { readFileSync } = await import('node:fs');
     const source = readFileSync(new URL('../src/cli.ts', import.meta.url), 'utf8');
-    expect(loggerCalls(source).length).toBeGreaterThan(20);
-    expect(offenders(source)).toEqual([]);
+    const { calls, offenders } = analyse(source);
+    expect(calls.length).toBeGreaterThan(20);
+    expect(offenders).toEqual([]);
   });
 
   it.each([
@@ -402,8 +393,10 @@ describe('cli.ts echoes image inputs only through displayInput', () => {
     ["logger.info('Input: ' +\n  options.initImage);", 'multi-line concatenation'],
     ['logger.info(`Input:\n${options.styleImage}\ndone`);', 'multi-line template literal'],
     ['logger.info(`Ref: ${options.backgroundReference}`);', 'a field outside the old fixed list'],
+    ['logger.info(`prefix ${`)`} mid ${options.image} suffix`);', 'nested template literal containing )'],
+    ["logger.info(String(options.image));", 'wrapped in the wrong function'],
   ])('control: flags %s (%s)', (code) => {
-    expect(offenders(code)).toHaveLength(1);
+    expect(analyse(code).offenders).toHaveLength(1);
   });
 
   it.each([
@@ -411,12 +404,29 @@ describe('cli.ts echoes image inputs only through displayInput', () => {
     "logger.info('Input: ' + displayInput(\n  options.image));",
     "logger.info('Image-to-image: using input image ' + displayInput(params.image));",
   ])('control: accepts the wrapped form %s', (code) => {
-    expect(offenders(code)).toEqual([]);
+    expect(analyse(code).offenders).toEqual([]);
   });
 });
 
 
+
 describe('recordSafeParams', () => {
+  // Dormant today (every params builder is flat) but the next shape change
+  // would have leaked silently: round-5 review.
+  it('recurses into nested objects and arrays of objects, and unwraps URL instances', () => {
+    const out = recordSafeParams({
+      nested: { image: 'https://cdn.example/a.png?sig=S' },
+      list: [{ image: 'https://cdn.example/b.png?sig=S' }],
+      url: new URL('https://cdn.example/c.png?sig=S'),
+      buffer: Buffer.from('x'),
+    });
+    expect(JSON.stringify(out)).not.toContain('sig=S');
+    expect(out.nested.image).toBe('https://cdn.example/a.png?[redacted]');
+    expect(out.list[0].image).toBe('https://cdn.example/b.png?[redacted]');
+    expect(out.url).toBe('https://cdn.example/c.png?[redacted]');
+    expect(Buffer.isBuffer(out.buffer)).toBe(true);
+  });
+
   it('redacts URL strings, element-wise in arrays, and leaves other values alone', () => {
     const out = recordSafeParams({
       image: 'https://cdn.example/a.png?sig=S',

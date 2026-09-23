@@ -240,7 +240,12 @@ again, so a fix to one should be carried to the other.
    it. Four review rounds each found one more site (download errors, the
    `Invalid URL` message nested inside them, CLI echoes, the metadata file), so the
    CLI echoes go through one helper (`displayInput`), a test parses every logger
-   call in `cli.ts`, and the metadata goes through `recordSafeParams`.
+   call in `cli.ts`, and the metadata goes through `recordSafeParams`. The guard
+   uses the TypeScript compiler's parser, not a regex or a hand-written scanner:
+   round 4 defeated a per-line regex and round 5 a quote tracker (a nested template
+   literal containing `)`), and an AST has neither failure. `recordSafeParams`
+   recurses into plain objects and unwraps `URL` instances, though every params
+   builder is flat today, so a new shape cannot leak silently.
 
 ## 11. Retry on type, only while polling
 
