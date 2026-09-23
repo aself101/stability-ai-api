@@ -25,6 +25,11 @@ parsers read the file as one document.
   Teredo (`2001::/32`, client address bit-inverted) passed the blocklist, so
   `https://[2002:7f00:1::1]` — 6to4 around 127.0.0.1 — was accepted. Deprecated
   site-local `fec0::/10` is now blocked too. Found by the pre-release security review.
+- **Signed URLs no longer reach logs or error messages.** Download log lines and the
+  `Failed to download image from …` errors carried the full URL; a signed URL's query
+  string is its credential, and `error`-level lines print by default. They now show
+  origin and path, with the query replaced by `?[redacted]`. Found by the pre-release
+  security review.
 
 ### Added
 

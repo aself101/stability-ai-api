@@ -16,7 +16,7 @@ import { isIPv4, isIPv6 } from 'net';
 import type { LookupFunction } from 'net';
 import { Agent } from 'undici';
 import type { Dispatcher } from 'undici';
-import { requestBytes, SSRF_BLOCKED_CODE } from './http.js';
+import { requestBytes, SSRF_BLOCKED_CODE, redactUrl } from './http.js';
 import type {
   SpinnerObject,
   ImageValidationConstraints,
@@ -228,11 +228,11 @@ export async function validateImageUrl(url: string): Promise<string> {
   const ipv6MappedMatch = url.match(/\[::ffff:(\d+\.\d+\.\d+\.\d+)\]/i);
   if (ipv6MappedMatch) {
     const extractedIPv4 = ipv6MappedMatch[1];
-    logger.warn(`SECURITY: Detected IPv4-mapped IPv6 address in URL: ${url} → ${extractedIPv4}`);
+    logger.warn(`SECURITY: Detected IPv4-mapped IPv6 address in URL: ${redactUrl(url)} → ${extractedIPv4}`);
 
     // Validate the extracted IPv4 directly
     if (extractedIPv4 === '127.0.0.1' || extractedIPv4.startsWith('127.')) {
-      logger.warn(`SECURITY: Blocked IPv4-mapped IPv6 localhost: ${url}`);
+      logger.warn(`SECURITY: Blocked IPv4-mapped IPv6 localhost: ${redactUrl(url)}`);
       throw new Error('Access to localhost is not allowed');
     }
 
@@ -246,7 +246,7 @@ export async function validateImageUrl(url: string): Promise<string> {
     ];
 
     if (privatePatterns.some(pattern => pattern.test(extractedIPv4))) {
-      logger.warn(`SECURITY: Blocked IPv4-mapped IPv6 private IP: ${url}`);
+      logger.warn(`SECURITY: Blocked IPv4-mapped IPv6 private IP: ${redactUrl(url)}`);
       throw new Error('Access to internal/private IP addresses is not allowed');
     }
   }
@@ -663,12 +663,12 @@ export async function urlToBase64(url: string): Promise<string> {
   try {
     const bytes = await fetchImageBytes(url);
     const base64 = bytes.toString('base64');
-    logger.debug(`Downloaded and converted ${url} to base64 (${base64.length} chars, ${bytes.length} bytes)`);
+    logger.debug(`Downloaded and converted ${redactUrl(url)} to base64 (${base64.length} chars, ${bytes.length} bytes)`);
     return base64;
   } catch (error) {
     const err = toError(error);
     logger.error(`Error downloading image from URL: ${err.message}`);
-    throw new Error(`Failed to download image from '${url}': ${err.message}`, { cause: error });
+    throw new Error(`Failed to download image from '${redactUrl(url)}': ${err.message}`, { cause: error });
   }
 }
 
@@ -884,13 +884,13 @@ export async function fileToBuffer(filePath: string): Promise<Buffer> {
  */
 export async function urlToBuffer(url: string): Promise<Buffer> {
   try {
-    logger.debug(`Downloading image from URL: ${url}`);
+    logger.debug(`Downloading image from URL: ${redactUrl(url)}`);
     const buffer = await fetchImageBytes(url);
-    logger.debug(`Downloaded ${buffer.length} bytes from ${url}`);
+    logger.debug(`Downloaded ${buffer.length} bytes from ${redactUrl(url)}`);
     return buffer;
   } catch (error) {
     const err = toError(error);
-    logger.error(`Failed to download image from ${url}: ${err.message}`);
+    logger.error(`Failed to download image from ${redactUrl(url)}: ${err.message}`);
     throw new Error(`Failed to download image from URL: ${err.message}`, { cause: error });
   }
 }

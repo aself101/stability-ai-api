@@ -32,6 +32,7 @@ import {
   urlToBase64,
   urlToBuffer,
   createGuardedLookup,
+  logger,
   downloadImage,
   detectImageMime,
   MAX_DOWNLOAD_SIZE
@@ -831,6 +832,24 @@ describe('URL downloads', () => {
     );
     await urlToBuffer('https://cdn.example/a.png');
     expect(calls.map(c => c.url)).toEqual(['https://cdn.example/a.png', 'https://cdn2.example/a.png']);
+  });
+
+  it('keeps a signed URL\'s query out of logs and error messages', async () => {
+    stubFetch(() => new Response('gone', { status: 404 }));
+    const logged = [];
+    const spies = ['error', 'warn', 'info', 'debug'].map(level =>
+      vi.spyOn(logger, level).mockImplementation((msg) => { logged.push(String(msg)); return logger; })
+    );
+    try {
+      const signed = 'https://cdn.example/a.png?sig=SECRET-TOKEN';
+      const e1 = await urlToBase64(signed).catch(e => e);
+      const e2 = await urlToBuffer(signed).catch(e => e);
+      for (const text of [e1.message, e2.message, ...logged]) expect(text).not.toContain('SECRET-TOKEN');
+      expect(e1.message).toContain('https://cdn.example/a.png?[redacted]');
+      expect(logged.some(line => line.includes('https://cdn.example/a.png?[redacted]'))).toBe(true);
+    } finally {
+      spies.forEach(spy => spy.mockRestore());
+    }
   });
 
   it('every download hop goes through the connect-time SSRF guard dispatcher', async () => {

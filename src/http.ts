@@ -63,6 +63,21 @@ const RETRYABLE_NETWORK_CODES = new Set([
 export const SSRF_BLOCKED_CODE = 'ESSRFBLOCKED';
 
 /**
+ * A URL safe to put in a log line or error message: origin and path only.
+ * Download URLs are often signed (BFL result links carry the signature in the
+ * query string), so the query becomes `?[redacted]` and the fragment and any
+ * credentials are dropped. Unparseable input is not echoed.
+ */
+export function redactUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    return `${u.origin}${u.pathname}${u.search ? '?[redacted]' : ''}`;
+  } catch {
+    return '[unparseable URL]';
+  }
+}
+
+/**
  * An HTTP response the API returned that was not a success.
  *
  * `body` is the parsed response body when it was JSON, the raw text otherwise —
@@ -300,7 +315,7 @@ export async function request(
         if (!location) break; // a redirect status with no target: reported as a network error below
         if (hops >= maxRedirects) {
           throw new StabilityHttpError(
-            `Too many redirects (limit ${maxRedirects}) starting from ${url}`,
+            `Too many redirects (limit ${maxRedirects}) starting from ${redactUrl(url)}`,
             response.status
           );
         }
@@ -368,7 +383,7 @@ export async function requestJson(url: string, options: RequestOptions): Promise
   try {
     return JSON.parse(text) as unknown;
   } catch (error) {
-    throw new StabilityNetworkError(`Expected JSON from ${url} but received ${text.slice(0, 120)}`, undefined, error);
+    throw new StabilityNetworkError(`Expected JSON from ${redactUrl(url)} but received ${text.slice(0, 120)}`, undefined, error);
   }
 }
 
