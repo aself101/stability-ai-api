@@ -32,6 +32,8 @@ parsers read the file as one document.
 
 ### Fixed
 
+- README "Related Packages" linked `openai-api`, a repository that does not exist (404);
+  it is `openai-image-api`.
 - `sai --help` printed the `--log-level` default twice (`default info) (default:
   "info")`).
 
