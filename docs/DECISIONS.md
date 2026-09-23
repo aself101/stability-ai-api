@@ -196,8 +196,9 @@ each hop (#10).
 Also, `urlToBase64` now validates its own argument. Called directly, it performed no
 check at all.
 
-Items 2 and 3 **are not yet fixed in bfl-api**. Its `isBlockedIP` and `validateImageUrl`
-are the same code; carry this over.
+Items 2 and 3 (and 4 and 5 below) were carried to bfl-api in its 2.0.2; the two
+packages' `isBlockedIP`, `validateImageUrl` and `createGuardedLookup` are the same code
+again, so a fix to one should be carried to the other.
 
 4. **(ship run #2)** Node's URL parser rewrites `https://[::ffff:127.0.0.1]` to
    `[::ffff:7f00:1]`, and only the dotted mapped form was recognised, so the hex
