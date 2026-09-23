@@ -10,6 +10,21 @@ parsers read the file as one document.
 
 ## [1.0.1] - 2026-09-22
 
+### Added
+
+- `createGuardedLookup` and the `AllAddressResolver` type in `stability-ai-api/utils`:
+  the connect-time guard, for callers who build their own undici `Agent`.
+- `undici` as a runtime dependency, pinned to major 7. An undici 8 `Agent` is rejected
+  by Node 22's and 24's global fetch (`UND_ERR_INVALID_ARG`), so it must not be bumped
+  across the major; see DECISIONS #23.
+
+### Fixed
+
+- README "Related Packages" linked `openai-api`, a repository that does not exist (404);
+  it is `openai-image-api`.
+- `sai --help` printed the `--log-level` default twice (`default info) (default:
+  "info")`).
+
 ### Security
 
 - **DNS rebinding is closed for URL downloads** (`urlToBuffer`, `urlToBase64`,
@@ -41,20 +56,7 @@ parsers read the file as one document.
   follow no redirects (DECISIONS #9), so this is a backstop for any future
   authenticated call site; it was a live leak in bfl-api, which shares the loop.
 
-### Added
-
-- `createGuardedLookup` and the `AllAddressResolver` type in `stability-ai-api/utils`:
-  the connect-time guard, for callers who build their own undici `Agent`.
-- `undici` as a runtime dependency, pinned to major 7. An undici 8 `Agent` is rejected
-  by Node 22's and 24's global fetch (`UND_ERR_INVALID_ARG`), so it must not be bumped
-  across the major; see DECISIONS #23.
-
-### Fixed
-
-- README "Related Packages" linked `openai-api`, a repository that does not exist (404);
-  it is `openai-image-api`.
-- `sai --help` printed the `--log-level` default twice (`default info) (default:
-  "info")`).
+## [1.0.0] - 2026-09-22
 
 Brings the wrapper to the bfl-api 2.0 / kling-api 2.0 baseline and the current Stability API.
 Every endpoint and SD 3.5 model was run live against production (`docs/LIVE-BATTERY-2026-09-22.md`);
