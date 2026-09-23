@@ -10,8 +10,13 @@ import { statSync } from 'fs';
 import path from 'path';
 import winston from 'winston';
 import { lookup } from 'dns/promises';
+import { lookup as lookupCallback } from 'dns';
+import type { LookupAddress, LookupAllOptions } from 'dns';
 import { isIPv4, isIPv6 } from 'net';
-import { requestBytes } from './http.js';
+import type { LookupFunction } from 'net';
+import { Agent } from 'undici';
+import type { Dispatcher } from 'undici';
+import { requestBytes, SSRF_BLOCKED_CODE } from './http.js';
 import type {
   SpinnerObject,
   ImageValidationConstraints,
@@ -201,7 +206,9 @@ function isBlockedIP(ip: string): boolean {
 /**
  * Validate image URL for security.
  * Enforces HTTPS and blocks private IPs, localhost, and cloud metadata endpoints.
- * Performs DNS resolution to prevent DNS rebinding attacks.
+ * Resolves domain names and checks every answer. This is the check-time half:
+ * downloads also connect through `createGuardedLookup`, which re-checks the
+ * addresses actually connected to — that, not this, is what stops DNS rebinding.
  *
  * @param url - URL to validate
  * @returns Validated URL
@@ -267,7 +274,8 @@ export async function validateImageUrl(url: string): Promise<string> {
       throw new Error('Access to internal/private IP addresses is not allowed');
     }
   } else {
-    // Hostname is a domain name - perform DNS resolution to prevent DNS rebinding.
+    // Hostname is a domain name: resolve and check it now, for an early and
+    // readable refusal. The connect-time guard re-checks what is connected to.
     // Only the lookup sits inside the try: until 1.0 the blocked-address check
     // did too, and the catch told its own error apart from a DNS failure by
     // matching the message text 'resolves to internal'.
@@ -546,6 +554,75 @@ export async function fileToBase64(filepath: string): Promise<string> {
   }
 }
 
+/** A resolver with `dns.lookup`'s `{ all: true }` shape; injectable for tests. */
+export type AllAddressResolver = (
+  hostname: string,
+  options: LookupAllOptions,
+  callback: (err: NodeJS.ErrnoException | null, addresses: LookupAddress[]) => void
+) => void;
+
+/**
+ * Build a connect-time `lookup` for an undici `Agent` that refuses to connect
+ * when any resolved address is blocked (private, loopback, link-local,
+ * metadata — the `validateImageUrl` blocklist).
+ *
+ * This is what closes DNS rebinding. `validateImageUrl` resolves the name and
+ * checks the answers, then fetch resolves it again to connect; a name whose
+ * record changes between the two (low TTL, attacker-run DNS) passed the first
+ * and connected to the second. Here the addresses that are checked are the
+ * addresses the socket is given, so there is no second resolution to race.
+ * `validateImageUrl` still runs first: it covers IP literals (which undici
+ * connects to without a lookup) and gives an early, readable refusal.
+ *
+ * The refusal is an Error with `.code === 'ESSRFBLOCKED'`; `request()` rethrows
+ * it as is rather than as a generic network error.
+ *
+ * @param resolve - Resolver to wrap (default `dns.lookup`)
+ * @param isBlocked - Address predicate (default: the SSRF blocklist)
+ * @returns A `lookup` for `new Agent({ connect: { lookup } })`
+ */
+export function createGuardedLookup(
+  resolve: AllAddressResolver = lookupCallback,
+  isBlocked: (ip: string) => boolean = isBlockedIP
+): LookupFunction {
+  return (hostname, options, callback) => {
+    resolve(hostname, { family: options.family, hints: options.hints, all: true }, (err, addresses) => {
+      if (err) {
+        callback(err, '');
+        return;
+      }
+      const blocked = addresses.find(a => isBlocked(a.address));
+      if (blocked || addresses.length === 0) {
+        const refusal: NodeJS.ErrnoException = new Error(
+          blocked
+            ? `Domain ${hostname} resolves to internal/private IP address`
+            : `Domain ${hostname} resolved to no addresses`
+        );
+        refusal.code = SSRF_BLOCKED_CODE;
+        if (blocked) logger.warn(`SECURITY: connect-time lookup of ${hostname} returned blocked IP: ${blocked.address}`);
+        callback(refusal, '');
+        return;
+      }
+      if (options.all) {
+        callback(null, addresses);
+      } else {
+        callback(null, addresses[0].address, addresses[0].family);
+      }
+    });
+  };
+}
+
+/**
+ * The dispatcher every URL download goes through. Created on first use, not at
+ * import: the library has no import-time side effects (docs/DECISIONS.md #19).
+ * undici must stay on major 7 — see DECISIONS #23.
+ */
+let downloadDispatcher: Dispatcher | undefined;
+function getDownloadDispatcher(): Dispatcher {
+  downloadDispatcher ??= new Agent({ connect: { lookup: createGuardedLookup() } });
+  return downloadDispatcher;
+}
+
 /**
  * Fetch image bytes from a URL: validated, redirect hops re-validated,
  * size-capped while streaming. The single download path for every URL helper
@@ -562,6 +639,7 @@ async function fetchImageBytes(url: string): Promise<Buffer> {
     maxRedirects: MAX_REDIRECTS,
     maxBytes: MAX_DOWNLOAD_SIZE,
     validateHop: validateImageUrl,
+    dispatcher: getDownloadDispatcher(),
   });
 }
 

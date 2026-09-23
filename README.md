@@ -4,8 +4,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node.js Version](https://img.shields.io/node/v/stability-ai-api)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue.svg)](https://www.typescriptlang.org/)
-[![Tests](https://img.shields.io/badge/tests-520%20passing-brightgreen)](test/)
-[![Coverage](https://img.shields.io/badge/coverage-94.4%25-brightgreen)](test/)
+[![Tests](https://img.shields.io/badge/tests-535%20passing-brightgreen)](test/)
+[![Coverage](https://img.shields.io/badge/coverage-94.3%25-brightgreen)](test/)
 
 A TypeScript/Node.js wrapper for the [Stability AI API](https://platform.stability.ai/docs/api-reference) that provides easy access to Stable Diffusion 3.5, image upscaling, editing, and control models. Generate stunning AI images, upscale, edit, and control them with professional quality through a simple command-line interface.
 
@@ -86,7 +86,7 @@ The Stability AI API provides access to state-of-the-art image generation and up
 - **Organized Storage** - Structured directories with timestamped files and metadata
 - **CLI Orchestration** - Command-line tool with subcommands for generation and upscaling
 - **Full TypeScript Support** - Complete type definitions for all API methods, parameters, and responses
-- **Comprehensive Testing** - 520 tests, 94.4% line coverage (api.ts 97.3%, cli-helpers.ts 100%, config.ts 93.8%, http.ts 91.3%, utils.ts 91.9%; measured at the release commit, 2026-09-22), no network access; a spec-drift check against the live API runs in CI
+- **Comprehensive Testing** - 535 tests, 94.3% line coverage (api.ts 97.3%, cli-helpers.ts 100%, config.ts 93.8%, http.ts 89.7%, utils.ts 92.3%; measured at 1.0.1, 2026-09-22), no network access beyond local test servers; a spec-drift check against the live API runs in CI
 
 ### Endpoint Summary
 
@@ -549,6 +549,7 @@ const { valid, errors } = validateModelParams('sd3', { model: 'sd3.5-flash', cfg
 | Export | What it is |
 |---|---|
 | `validateImageUrl` | SSRF check: HTTPS only, every DNS answer checked against private/loopback/metadata ranges |
+| `createGuardedLookup`, `AllAddressResolver` (type) | Connect-time SSRF guard: a `lookup` for an undici 7 `Agent` that refuses blocked addresses; the downloads above already use it |
 | `imageToBuffer`, `fileToBuffer`, `urlToBuffer` | Load an input image from a path or a validated URL (redirect hops re-validated, 50 MB cap) |
 | `imageToBase64`, `fileToBase64`, `urlToBase64`, `downloadImage` | The same, as base64 or to disk |
 | `buildFormData`, `detectImageMime` | Build a multipart body with typed image parts |
@@ -1317,7 +1318,7 @@ datasets/
 - IPv6 addresses that embed an IPv4 address — mapped (`::ffff:…`, dotted or hex), translated, NAT64 (`64:ff9b::/96`), IPv4-compatible — are judged by the IPv4 they route to
 - Domain names are resolved and **every** returned address is checked (a name with one public and one private record is refused)
 - Every redirect hop is re-validated before it is followed
-- **Known gap — DNS rebinding:** validation resolves the name, then the download resolves it again independently. A name whose DNS answer changes between the two (a rebinding attack) can still reach an internal address. Closing this needs a pinned-IP connection (see docs/DECISIONS.md #10); treat image URLs from untrusted users accordingly
+- **DNS rebinding is closed (1.0.1):** downloads connect through an undici dispatcher whose lookup checks the addresses the socket is actually given, so a name that resolves public at validation and private at connect time is refused before any connection is made (docs/DECISIONS.md #10, #23)
 
 ### DoS Prevention
 - Request timeout: 180 seconds without data for API calls (synchronous endpoints send nothing until the image is ready)

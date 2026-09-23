@@ -28,6 +28,7 @@ bfl's `docs/DECISIONS.md` number, so a fix to one package can be carried to the 
 - [20. A content-filtered result is a success with a warning, not an error](#20-a-content-filtered-result-is-a-success-with-a-warning-not-an-error)
 - [21. Known gaps recorded rather than fixed in 1.0](#21-known-gaps-recorded-rather-than-fixed-in-10)
 - [22. Task ids are validated before they are put in a URL](#22-task-ids-are-validated-before-they-are-put-in-a-url)
+- [23. `undici` is a dependency, pinned to major 7](#23-undici-is-a-dependency-pinned-to-major-7)
 
 ## 1. Scope of the 1.0 endpoint set
 
@@ -205,10 +206,17 @@ are the same code; carry this over.
    is judged as that IPv4. 100.64/10, 198.18/15, 192.0.0/24, 224/3 and ff00::/8
    were added to the blocklist.
 
-**Still open**, as in bfl: DNS rebinding. Validation resolves, then fetch resolves
-again independently, which leaves a time-of-check/time-of-use window. Closing it needs
-a pinned-IP dispatcher, which means an explicit `undici` dependency. This is recorded
-as a known limitation.
+5. **(1.0.1) DNS rebinding.** Validation resolved the name, then fetch resolved it
+   again to connect, leaving a time-of-check/time-of-use window: a name answering
+   public, then private (low TTL, attacker-run DNS) passed the check and connected
+   inward. Downloads now go through an undici `Agent` whose `connect.lookup`
+   (`createGuardedLookup`) resolves every address and refuses if any is blocked; the
+   addresses checked are the addresses the socket gets, so there is no second
+   resolution to race. `validateImageUrl` still runs first: undici connects to IP
+   literals without a lookup, and the early check gives the readable refusal. API
+   calls to `api.stability.ai` keep the default dispatcher — a fixed host with no
+   redirects has no rebinding surface worth a second pool. The dependency this needs
+   is pinned to major 7 (#23).
 
 ## 11. Retry on type, only while polling
 
@@ -358,7 +366,6 @@ from scripts. Alex chose the CLI exit code (2026-09-22).
   `finish-reason`/`seed` headers, the 202 `{ id }` body and the results endpoint's
   bytes have no guard; a change there shows up at runtime, after billing. The
   response-shape guards (#16) make it loud rather than silent.
-- **DNS rebinding** (#10): validation and download resolve separately.
 - **402 semantics** are mapped by HTTP convention; not confirmed that Stability uses
   402 for an empty balance.
 - **The final poll can get a tiny budget.** If the last sleep ends just before the
@@ -375,4 +382,28 @@ different endpoint, carrying the API key. Stability's ids are 64-character hex
 (`GenerationID` in the spec); the check is looser than that on purpose, so a
 change in id length does not break resume, while still refusing `.`, `/` and `%`.
 
+## 23. `undici` is a dependency, pinned to major 7
 
+The rebinding guard (#10) needs an undici `Agent` passed to fetch as its
+`dispatcher`, and Node does not expose the undici it bundles, so `undici` is an
+explicit dependency. It stays on **major 7** (`^7`), for a measured reason: on both
+Node 22.23 (bundled undici 6.28) and Node 24.14 (bundled 7.24), global `fetch`
+rejects an undici **8** `Agent` with `UND_ERR_INVALID_ARG` on every request — the
+happy path included — while an undici 7 `Agent` works on both (checked 2026-09-22).
+A bump to 8 would therefore break every image download, not just the guard.
+
+Global `fetch` is kept rather than switching the download path to undici's own
+`fetch`: the unit suite's network guard and fetch stubs intercept the global, and
+moving downloads off it would silently exempt them from both.
+
+Types are the other seam. `@types/node` types `fetch` against its own copy of
+undici's declarations (`undici-types`), whose version follows `@types/node`, not
+the undici we install; the two `Dispatcher` declarations differ structurally. The
+option is widened at the one place they meet (`request()` in `src/http.ts`) rather
+than by pinning undici to whatever `undici-types` happens to be.
+
+**Guarded by** the `dispatcher: connect-time SSRF guard` suite in
+`test/http.test.ts`, which drives real global fetch with the real `Agent` against a
+local server: with undici 8 installed all four of its tests fail (checked). Revisit
+when Node's bundled undici reaches 8 — then a bump becomes possible, and this test
+says whether it works.

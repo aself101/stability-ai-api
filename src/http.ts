@@ -29,7 +29,14 @@
  * Timeouts are *idle* timeouts, matching what Node's socket timeout gave us
  * before: the clock resets on each chunk, so a large but progressing download
  * is not killed mid-flight.
+ *
+ * - **Optional dispatcher.** Image downloads pass an undici `Agent` whose
+ *   connect-time lookup refuses private addresses (utils.ts
+ *   `createGuardedLookup`), which is what closes the DNS-rebinding window that
+ *   `validateHop` alone leaves open. API calls use the default dispatcher.
  */
+
+import type { Dispatcher } from 'undici';
 
 /** Statuses that may carry a `Location` we should follow. */
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
@@ -46,6 +53,14 @@ const RETRYABLE_NETWORK_CODES = new Set([
   'UND_ERR_HEADERS_TIMEOUT',
   'UND_ERR_BODY_TIMEOUT',
 ]);
+
+/**
+ * `.code` of the error a connect-time SSRF guard raises (utils.ts
+ * `createGuardedLookup`). Defined here rather than in utils.ts because utils
+ * imports this module. `asTypedError` rethrows the guard's own error, so a
+ * refused download reads as a refusal, not as "Network request failed".
+ */
+export const SSRF_BLOCKED_CODE = 'ESSRFBLOCKED';
 
 /**
  * An HTTP response the API returned that was not a success.
@@ -120,6 +135,12 @@ export interface RequestOptions {
   validateHop?: (url: string) => Promise<unknown> | unknown;
   /** Byte ceiling for the response body; exceeded => abort mid-stream. */
   maxBytes?: number;
+  /**
+   * undici dispatcher for this request and every redirect hop. Must come from
+   * undici 7: an undici 8 `Agent` is rejected by Node 22's and 24's global
+   * fetch (`UND_ERR_INVALID_ARG`) — see docs/DECISIONS.md #23.
+   */
+  dispatcher?: Dispatcher;
 }
 
 /** Parse a `Retry-After` header in delta-seconds form. */
@@ -135,6 +156,20 @@ function parseRetryAfter(headers: Headers): number | undefined {
  * cause one level down, and when several addresses were tried it is an
  * AggregateError whose `errors` hold the individual codes.
  */
+/** The first Error in a `.cause` / `.errors` chain whose `.code` is `code`. */
+function causeWithCode(cause: unknown, code: string): Error | undefined {
+  if (!cause || typeof cause !== 'object') return undefined;
+  const c = cause as { code?: unknown; errors?: unknown[]; cause?: unknown };
+  if (c.code === code && cause instanceof Error) return cause;
+  if (Array.isArray(c.errors)) {
+    for (const nested of c.errors) {
+      const found = causeWithCode(nested, code);
+      if (found) return found;
+    }
+  }
+  return causeWithCode(c.cause, code);
+}
+
 function causeCode(cause: unknown): string | undefined {
   if (!cause || typeof cause !== 'object') return undefined;
   const c = cause as { code?: string; errors?: unknown[]; cause?: unknown };
@@ -160,6 +195,8 @@ function asTypedError(error: unknown, timeoutMs: number, timedOut: boolean): Err
   }
   // undici surfaces transport failures as TypeError('fetch failed') with the
   // real cause attached; the message itself carries nothing usable.
+  const refusal = causeWithCode(err?.cause, SSRF_BLOCKED_CODE);
+  if (refusal) return refusal;
   const code = causeCode(err?.cause);
   return new StabilityNetworkError(
     code ? `Network request failed (${code})` : `Network request failed: ${err?.message ?? 'unknown'}`,
@@ -215,7 +252,7 @@ export async function request(
   url: string,
   options: RequestOptions
 ): Promise<{ status: number; headers: Headers; bytes: Buffer; url: string }> {
-  const { method = 'GET', headers = {}, json, form, timeoutMs, maxRedirects = 5, validateHop, maxBytes } =
+  const { method = 'GET', headers = {}, json, form, timeoutMs, maxRedirects = 5, validateHop, maxBytes, dispatcher } =
     options;
   if (form !== undefined && json !== undefined && json !== null) {
     throw new TypeError('request(): pass either json or form, not both');
@@ -242,13 +279,20 @@ export async function request(
     let hops = 0;
 
     for (;;) {
-      const response = await fetch(currentUrl, {
+      const init: RequestInit = {
         method: currentMethod,
         headers,
         body,
         redirect: 'manual',
         signal: controller.signal,
-      });
+      };
+      // @types/node types fetch against its own bundled copy of undici's types
+      // (undici-types), and npm undici ships a second copy at its own version;
+      // the two Dispatcher declarations differ structurally (compose overloads)
+      // while the runtime contract is the same. The http.test.ts dispatcher
+      // test is the evidence for the pairing; this is the one place the copies meet.
+      if (dispatcher) (init as { dispatcher?: unknown }).dispatcher = dispatcher;
+      const response = await fetch(currentUrl, init);
       resetIdle();
 
       if (REDIRECT_STATUSES.has(response.status)) {

@@ -8,7 +8,32 @@ parsers read the file as one document.
 
 ## [Unreleased]
 
-## [1.0.0] - 2026-09-22
+## [1.0.1] - 2026-09-22
+
+### Security
+
+- **DNS rebinding is closed for URL downloads** (`urlToBuffer`, `urlToBase64`,
+  `downloadImage`, and every URL input the API methods accept). 1.0.0 validated a
+  name by resolving it, then let fetch resolve it again to connect; a name that
+  answered public and then private (a rebinding attack) passed the check and connected
+  to the internal address. Downloads now connect through an undici `Agent` whose
+  lookup checks every address it hands the socket, so the refusal happens before any
+  connection is made. Refusals carry `code: 'ESSRFBLOCKED'` and the same message
+  `validateImageUrl` uses. This was 1.0.0's documented known gap (docs/DECISIONS.md
+  #10, #23).
+
+### Added
+
+- `createGuardedLookup` and the `AllAddressResolver` type in `stability-ai-api/utils`:
+  the connect-time guard, for callers who build their own undici `Agent`.
+- `undici` as a runtime dependency, pinned to major 7. An undici 8 `Agent` is rejected
+  by Node 22's and 24's global fetch (`UND_ERR_INVALID_ARG`), so it must not be bumped
+  across the major; see DECISIONS #23.
+
+### Fixed
+
+- `sai --help` printed the `--log-level` default twice (`default info) (default:
+  "info")`).
 
 Brings the wrapper to the bfl-api 2.0 / kling-api 2.0 baseline and the current Stability API.
 Every endpoint and SD 3.5 model was run live against production (`docs/LIVE-BATTERY-2026-09-22.md`);

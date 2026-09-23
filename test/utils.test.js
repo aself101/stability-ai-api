@@ -31,6 +31,7 @@ import {
   fileToBase64,
   urlToBase64,
   urlToBuffer,
+  createGuardedLookup,
   downloadImage,
   detectImageMime,
   MAX_DOWNLOAD_SIZE
@@ -38,6 +39,7 @@ import {
 import { stubFetch, imageResponse, PNG_BYTES } from './helpers/fetch-mock.js';
 import { validateApiKeyFormat } from '../src/config.js';
 import { lookup } from 'dns/promises';
+import { Agent } from 'undici';
 
 describe('Utility Functions', () => {
   describe('promptToFilename', () => {
@@ -808,6 +810,18 @@ describe('URL downloads', () => {
     expect(calls.map(c => c.url)).toEqual(['https://cdn.example/a.png', 'https://cdn2.example/a.png']);
   });
 
+  it('every download hop goes through the connect-time SSRF guard dispatcher', async () => {
+    const calls = stubFetch((url) =>
+      url === 'https://cdn.example/a.png'
+        ? new Response(null, { status: 302, headers: { location: 'https://cdn2.example/a.png' } })
+        : imageResponse()
+    );
+    await urlToBuffer('https://cdn.example/a.png');
+    expect(calls).toHaveLength(2);
+    for (const call of calls) expect(call.init.dispatcher).toBeInstanceOf(Agent);
+    expect(calls[1].init.dispatcher).toBe(calls[0].init.dispatcher);
+  });
+
   it('urlToBase64 validates its own argument (0.4.0 skipped this when called directly)', async () => {
     const calls = stubFetch(() => imageResponse());
     await expect(urlToBase64('https://127.0.0.1/a.png')).rejects.toThrow('internal/private');
@@ -924,5 +938,56 @@ describe('writeToFile / readFromFile keep image bytes intact', () => {
     const back = await readFromFile(file);
     expect(Buffer.isBuffer(back)).toBe(true);
     expect(back.equals(bytes)).toBe(true);
+  });
+});
+
+describe('createGuardedLookup (connect-time SSRF guard)', () => {
+  const resolver = (addresses, err = null) => (_host, _opts, cb) => cb(err, addresses);
+  const run = (lookupFn, options) =>
+    new Promise(resolve => lookupFn('cdn.example', options, (err, address, family) => resolve({ err, address, family })));
+
+  it('passes every address through when all are public (all: true)', async () => {
+    const addrs = [{ address: '93.184.216.34', family: 4 }, { address: '2606:2800:220:1::1', family: 6 }];
+    const { err, address } = await run(createGuardedLookup(resolver(addrs)), { all: true });
+    expect(err).toBeNull();
+    expect(address).toEqual(addrs);
+  });
+
+  it('returns the first address and its family when all is not requested', async () => {
+    const { err, address, family } = await run(createGuardedLookup(resolver([{ address: '93.184.216.34', family: 4 }])), {});
+    expect(err).toBeNull();
+    expect(address).toBe('93.184.216.34');
+    expect(family).toBe(4);
+  });
+
+  it.each([
+    ['one private among public', [{ address: '93.184.216.34', family: 4 }, { address: '10.0.0.1', family: 4 }]],
+    ['loopback', [{ address: '127.0.0.1', family: 4 }]],
+    ['cloud metadata', [{ address: '169.254.169.254', family: 4 }]],
+    ['IPv6 unique-local', [{ address: 'fd12:3456::1', family: 6 }]],
+    ['hex IPv4-mapped loopback', [{ address: '::ffff:7f00:1', family: 6 }]],
+  ])('refuses with ESSRFBLOCKED: %s', async (_label, addrs) => {
+    const { err } = await run(createGuardedLookup(resolver(addrs)), { all: true });
+    expect(err.code).toBe('ESSRFBLOCKED');
+    expect(err.message).toContain('resolves to internal/private IP address');
+  });
+
+  it('refuses an empty answer rather than handing undici nothing', async () => {
+    const { err } = await run(createGuardedLookup(resolver([])), { all: true });
+    expect(err.code).toBe('ESSRFBLOCKED');
+  });
+
+  it('passes a resolver error through unchanged', async () => {
+    const dnsError = Object.assign(new Error('getaddrinfo ENOTFOUND cdn.example'), { code: 'ENOTFOUND' });
+    const { err } = await run(createGuardedLookup(resolver(undefined, dnsError)), { all: true });
+    expect(err).toBe(dnsError);
+  });
+
+  it('always asks the resolver for every address, whatever the caller asked for', async () => {
+    const seen = [];
+    const spy = (_host, opts, cb) => { seen.push(opts.all); cb(null, [{ address: '93.184.216.34', family: 4 }]); };
+    await run(createGuardedLookup(spy), {});
+    await run(createGuardedLookup(spy), { all: false });
+    expect(seen).toEqual([true, true]);
   });
 });

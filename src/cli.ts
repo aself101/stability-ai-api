@@ -246,7 +246,7 @@ program
   .version(pkg.version)
   .option('--api-key <key>', 'Stability AI API key (overrides env var)')
   .option('--output-dir <dir>', 'Output directory for generated images')
-  .option('--log-level <level>', 'Log level (debug, info, warn, error; default info)', parseLogLevel, 'info')
+  .option('--log-level <level>', 'Log level (debug, info, warn, error)', parseLogLevel, 'info')
   .option('--examples', 'Show usage examples and exit');
 
 /**

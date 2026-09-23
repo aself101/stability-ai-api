@@ -1,6 +1,6 @@
 {
   "name": "stability-ai-api",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Generates, upscales, edits and controls images through the Stability AI API (Stable Diffusion 3.5, Ultra, Core), with a CLI",
   "main": "dist/api.js",
   "types": "dist/api.d.ts",
@@ -90,6 +90,7 @@
   "dependencies": {
     "commander": "^11.1.0",
     "dotenv": "^16.3.1",
+    "undici": "^7.29.1",
     "winston": "^3.11.0"
   },
   "devDependencies": {
